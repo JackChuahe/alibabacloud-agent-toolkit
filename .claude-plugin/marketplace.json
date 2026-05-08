@@ -1,0 +1,24 @@
+{
+  "metadata": {
+    "description": "A plugin marketplace hosting installable agent plugins for Alibaba Cloud.",
+    "version": "1.0.0"
+  },
+  "name": "alibabacloud-agent-toolkit",
+  "owner": {
+    "name": "Alibaba Cloud"
+  },
+  "plugins": [
+    {
+      "category": "cloud",
+      "description": "Core Alibaba Cloud plugin scaffold with manifests, MCP placeholder, and future skill support.",
+      "keywords": [
+        "alibabacloud",
+        "aliyun",
+        "cloud"
+      ],
+      "name": "alibabacloud-core",
+      "source": "./plugins/alibabacloud-core",
+      "version": "1.0.0"
+    }
+  ]
+}
