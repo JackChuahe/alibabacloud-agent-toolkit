@@ -6,17 +6,17 @@
 
 Help AI coding agents build, deploy, and operate applications on Alibaba Cloud.
 
-This repository is initialized from a reference agent-toolkit structure, but reduced to a minimal Alibaba Cloud scaffold so it can evolve with Alibaba Cloud specific skills, plugins, and guidance.
+This repository provides Alibaba Cloud agent plugins, skills, MCP configuration, and validation tooling.
 
 ## Current Status
 
 The repository currently provides:
 
 - A top-level project scaffold for marketplace manifests, validation, CI, rules, and shared skills.
-- One active plugin scaffold: [`alibabacloud-core`](plugins/alibabacloud-core/).
+- One active plugin: [`alibabacloud-core`](plugins/alibabacloud-core/).
 - Placeholder plugin directories for future agent and data analytics plugins.
 
-The repository does not yet include finalized Alibaba Cloud skills or MCP server integration.
+The `alibabacloud-core` plugin includes an SDK usage skill that generates Alibaba Cloud OpenAPI interaction code through a constrained MCP server.
 
 ## Repository Layout
 
@@ -35,9 +35,37 @@ The repository does not yet include finalized Alibaba Cloud skills or MCP server
 
 | Plugin | Status | Description |
 |--------|--------|-------------|
-| [alibabacloud-core](plugins/alibabacloud-core/) | Scaffolded | Core Alibaba Cloud plugin metadata, MCP config placeholder, and skill directory scaffold. |
+| [alibabacloud-core](plugins/alibabacloud-core/) | Active | Alibaba Cloud OpenAPI SDK code generation using the local `alibabacloud-core` MCP server. |
 | `alibabacloud-agent` | Placeholder | Reserved for future agent-focused capabilities. |
 | `alibabacloud-data-analytics` | Placeholder | Reserved for future analytics and data workflow capabilities. |
+
+## Install `alibabacloud-core`
+
+### Codex
+
+```text
+codex plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
+```
+
+Then open Codex `/plugins` and install `alibabacloud-core`.
+
+### Claude Code
+
+```text
+/plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
+/plugin install alibabacloud-core@alibabacloud-agent-toolkit
+/reload-plugins
+```
+
+## MCP Safety
+
+The plugin defines an MCP server named `alibabacloud-core` with this policy:
+
+```text
+openapiexplorer:*=allow,*=deny
+```
+
+The SDK skill is restricted to `mcp__alibabacloud-core__AlibabaCloud___CallCLI`, so OpenAPI Explorer metadata is queried through the configured MCP server instead of unrestricted shell execution.
 
 ## Skills
 

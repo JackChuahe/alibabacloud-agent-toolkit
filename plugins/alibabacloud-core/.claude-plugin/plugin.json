@@ -2,7 +2,7 @@
   "author": {
     "name": "Alibaba Cloud"
   },
-  "description": "Core Alibaba Cloud plugin scaffold for agent skills, MCP integration, and common cloud workflows.",
+  "description": "Core Alibaba Cloud plugin for OpenAPI SDK code generation through a constrained MCP server.",
   "homepage": "https://github.com/acloudlabs-unofficial/alibabacloud-agent-toolkit",
   "keywords": [
     "alibabacloud",

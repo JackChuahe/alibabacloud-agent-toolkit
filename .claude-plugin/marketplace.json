@@ -10,7 +10,7 @@
   "plugins": [
     {
       "category": "cloud",
-      "description": "Core Alibaba Cloud plugin scaffold with manifests, MCP placeholder, and future skill support.",
+      "description": "Core Alibaba Cloud plugin for OpenAPI SDK code generation through a constrained MCP server.",
       "keywords": [
         "alibabacloud",
         "aliyun",

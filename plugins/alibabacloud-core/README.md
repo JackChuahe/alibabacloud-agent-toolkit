@@ -1,12 +1,12 @@
 # alibabacloud-core
 
-The primary plugin scaffold for the Alibaba Cloud Agent Toolkit.
+The primary Alibaba Cloud plugin for OpenAPI SDK code generation.
 
 This plugin currently includes:
 
 - Plugin manifests for Codex and Claude Code
-- An MCP configuration placeholder
-- An empty `skills/` directory for future Alibaba Cloud core skills
+- An SDK usage skill for generating Alibaba Cloud OpenAPI interaction code
+- An MCP server named `alibabacloud-core` constrained to OpenAPI Explorer calls
 
 ## Install
 
@@ -26,6 +26,8 @@ codex plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
 
 Then launch Codex and install the `alibabacloud-core` plugin from `/plugins`.
 
-## Status
+## MCP
 
-This plugin is a scaffold only. Final Alibaba Cloud skills and MCP server definitions have not been added yet.
+This plugin configures an MCP server named `alibabacloud-core` with the safety
+policy `openapiexplorer:*=allow,*=deny`. The SDK usage skill only calls tools
+from that MCP server, so command allow/deny policy stays centralized there.

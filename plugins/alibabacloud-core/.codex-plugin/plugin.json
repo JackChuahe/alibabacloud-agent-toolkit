@@ -1,7 +1,7 @@
 {
   "name": "alibabacloud-core",
   "version": "1.0.0",
-  "description": "Core Alibaba Cloud plugin scaffold for agent skills, MCP integration, and common cloud workflows.",
+  "description": "Core Alibaba Cloud plugin for OpenAPI SDK code generation through a constrained MCP server.",
   "author": {
     "name": "Alibaba Cloud"
   },
@@ -12,8 +12,8 @@
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Alibaba Cloud Core",
-    "shortDescription": "Alibaba Cloud agent plugin scaffold",
-    "longDescription": "Core Alibaba Cloud plugin scaffold for agent skills, MCP integration, and common cloud workflows.",
+    "shortDescription": "Alibaba Cloud OpenAPI SDK code generation",
+    "longDescription": "Generate Alibaba Cloud OpenAPI SDK interaction code through the constrained alibabacloud-core MCP server.",
     "developerName": "Alibaba Cloud",
     "category": "Cloud",
     "capabilities": [
