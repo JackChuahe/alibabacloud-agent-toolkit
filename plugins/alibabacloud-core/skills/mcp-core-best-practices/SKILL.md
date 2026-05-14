@@ -43,6 +43,7 @@ available operations.
 
 Once the target API is identified, use `AlibabaCloud___GetApiDefinition` to
 retrieve the full definition including:
+
 - Required and optional parameters
 - Request/response schemas
 - Authentication requirements
@@ -56,6 +57,7 @@ API definition and user-provided parameters. This avoids manual CLI syntax error
 ### 4. Execution
 
 Use `AlibabaCloud___CallCLI` to execute the generated command. Key constraints:
+
 - Commands must start with `aliyun`
 - No shell pipes, redirections, or operators
 - No shell variables or command substitution
@@ -78,6 +80,7 @@ default configuration.
 ## CLI Command Constraints
 
 When using `AlibabaCloud___CallCLI`, the following are NOT supported:
+
 - Bash/zsh pipes (`|`) or shell operators
 - `grep`, `awk`, `sed`, or other shell tools
 - Shell redirection (`>`, `>>`, `<`)
