@@ -44,6 +44,7 @@ NOT mean you should always run `aliyun` commands locally in the shell.
    - The user needs to install/configure the CLI itself
 
 **Use this skill's knowledge for:**
+
 - Understanding correct command syntax when calling `AlibabaCloud___CallCLI`
 - Generating CLI commands via `AlibabaCloud___GenerateCLICommand`
 - Knowing the difference between plugin-style and built-in-style commands
@@ -73,7 +74,7 @@ env prefix for the **same** skill token — the CLI stacks those sources, and
 **Pre-check: Aliyun CLI plugin update required** — [MUST] `aliyun configure set --auto-plugin-install true`;
 [MUST] `aliyun plugin update`.
 
-**CLI version milestones**
+### CLI Version Milestones
 
 | From version | What you gain |
 | ------------- | -------------- |

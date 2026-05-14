@@ -21,7 +21,7 @@ These entries are **not** exhaustive for every CLI workflow. For commands not co
 
 Administrators typically use a RAM-managed system policy (for example `AliyunRAMFullAccess`) only for the consenting principal, then grant least privilege to CLI users who sign in via OAuth.
 
-**`aliyun ess list-api-versions`**: implementation depend on CLI/plugin version and does not map to a single documented `ess:*` Action. 
+**`aliyun ess list-api-versions`**: implementation depend on CLI/plugin version and does not map to a single documented `ess:*` Action.
 
 **Local-only** behavior (`aliyun plugin list` for installed plugins, `aliyun <product> --help`) usually does **not** call your account’s RAM-protected APIs; `plugin install` / `plugin list-remote` need outbound network to Aliyun but often no RAM for **your** resources.
 
