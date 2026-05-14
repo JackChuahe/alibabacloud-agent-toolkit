@@ -65,6 +65,13 @@ Use `AlibabaCloud___CallCLI` to execute the generated command. Key constraints:
 
 ### 5. Cross-Account Execution
 
+**IMPORTANT**: For any operation involving member accounts, cross-account queries,
+or Resource Directory account resolution, you MUST first load the
+`multi-account-query` skill (invoke it via the Skill tool) before proceeding.
+That skill contains the complete workflow for alias-to-UID resolution, pagination
+handling, and proper use of `x_assume_account_id`. Do not attempt cross-account
+operations without reading it first.
+
 For Resource Directory member accounts, pass additional parameters to
 `AlibabaCloud___CallCLI`:
 

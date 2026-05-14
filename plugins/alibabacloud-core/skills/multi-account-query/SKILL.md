@@ -6,6 +6,13 @@ description: >
   then uses x_assume_account_id to assume into the target account for CLI calls.
   Use when the user references a member account by display name or alias, or
   explicitly asks to query resources in another account under the same RD.
+  MUST be loaded for any cross-account or member-account operation before
+  calling AlibabaCloud___CallCLI with x_assume_account_id.
+triggers: >
+  成员账号, member account, 跨账号, cross-account, 资源目录, resource directory,
+  x_assume_account_id, assume role, 其他账号, other account, 子账号资源,
+  ListAccounts, 账号下的, 查询账号, account alias, 多账号, multi-account,
+  某个账号的, 切换账号
 allowed-tools: "mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___SearchApis,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___GetApiDefinition,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___GenerateCLICommand"
 ---
 
@@ -34,17 +41,20 @@ identifier, proceed to step 2 to resolve it.
 
 ### 2. Resolve Account Alias to UID
 
-Use `AlibabaCloud___CallCLI` to list all member accounts:
+Use `AlibabaCloud___CallCLI` to list member accounts. The API returns at most 100
+accounts per page, so always set `--page-size 100` and handle pagination when the
+organization has more than 100 accounts:
 
 ```
-aliyun resourcedirectory list-accounts --region cn-hangzhou
+aliyun resourcedirectorymaster list-accounts --page-size 100 --page-number 1
 ```
 
 From the response, find the account whose `DisplayName` matches the user's input.
 Extract its `AccountId` field — this is the UID needed for cross-account access.
 
-If the response is paginated (contains `NextToken`), continue fetching with
-`--page-token <NextToken>` until all accounts are listed or the target is found.
+If the target is not found in the first page, increment `--page-number` and continue
+fetching until the target is found or all pages are exhausted (total account count is
+returned in the response's `TotalCount` field).
 
 If no match is found, report to the user and ask for clarification. Do not guess
 account IDs.
@@ -59,8 +69,9 @@ Example — list ECS instances in member account "dev-team":
 
 ```
 # Step 1: Resolve "dev-team" to its UID
-AlibabaCloud___CallCLI(command="aliyun resourcedirectory list-accounts --region cn-hangzhou")
+AlibabaCloud___CallCLI(command="aliyun resourcedirectorymaster list-accounts --page-size 100 --page-number 1")
 # → find AccountId where DisplayName == "dev-team", e.g. "1234567890123456"
+# → if not found and TotalCount > 100, continue with --page-number 2, 3, ...
 
 # Step 2: Query resources in that account
 AlibabaCloud___CallCLI(
