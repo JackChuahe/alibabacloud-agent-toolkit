@@ -1,12 +1,13 @@
 # alibabacloud-core
 
-The primary Alibaba Cloud plugin for OpenAPI SDK code generation.
+The primary Alibaba Cloud plugin for OpenAPI integration via MCP Server Core.
 
-This plugin currently includes:
+This plugin includes:
 
 - Plugin manifests for Codex and Claude Code
-- An SDK usage skill for generating Alibaba Cloud OpenAPI interaction code
-- An MCP server named `alibabacloud-core` constrained to OpenAPI Explorer calls
+- An MCP server named `alibabacloud-core` that covers all Alibaba Cloud OpenAPIs
+- Skills for SDK code generation, multi-account resource querying, and MCP Core
+  best practices
 
 ## Install
 
@@ -28,6 +29,29 @@ Then launch Codex and install the `alibabacloud-core` plugin from `/plugins`.
 
 ## MCP
 
-This plugin configures an MCP server named `alibabacloud-core` with the safety
-policy `openapiexplorer:*=allow,*=deny`. The SDK usage skill only calls tools
-from that MCP server, so command allow/deny policy stays centralized there.
+This plugin configures an MCP server named `alibabacloud-core` without a safety
+policy, allowing access to all Alibaba Cloud CLI commands. For production
+environments, configure a safety policy to restrict the callable command set:
+
+```json
+{
+  "mcpServers": {
+    "alibabacloud-core": {
+      "command": "uvx",
+      "args": [
+        "alibabacloud.mcp-proxy@latest",
+        "--safety-policy",
+        "ecs:*=allow,vpc:*=allow,*=deny"
+      ]
+    }
+  }
+}
+```
+
+## Skills
+
+| Skill | Description |
+|-------|-------------|
+| `alibabacloud-sdk-usage` | Generate or modify Alibaba Cloud SDK code using OpenAPI metadata |
+| `alibabacloud-multi-account-query` | Query resources across RD member accounts by alias |
+| `alibabacloud-mcp-core-best-practices` | Shared reference for MCP Core tool usage patterns |

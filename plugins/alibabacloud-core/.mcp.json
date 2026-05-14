@@ -3,9 +3,7 @@
     "alibabacloud-core": {
       "command": "uvx",
       "args": [
-        "alibabacloud.mcp-proxy@latest",
-        "--safety-policy",
-        "openapiexplorer:*=allow,*=deny"
+        "alibabacloud.mcp-proxy@latest"
       ]
     }
   }

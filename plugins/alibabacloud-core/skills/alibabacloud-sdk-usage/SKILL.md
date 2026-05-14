@@ -4,21 +4,18 @@ description: >
   Generate or modify code that calls Alibaba Cloud OpenAPIs. Use when the
   user asks for Alibaba Cloud SDK code, API parameters, endpoints, SDK
   dependencies, typed product SDK calls, or generic OpenAPI calls.
-allowed-tools: "mcp__alibabacloud-core__AlibabaCloud___CallCLI"
+allowed-tools: "mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___SearchApis,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___GetApiDefinition,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___ListApis,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___ListProducts,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___GenerateCLICommand"
 ---
 
 # Alibaba Cloud SDK Usage
 
-Use the user's local `alibabacloud-core` MCP server before writing Alibaba
-Cloud interaction code. Do not start another MCP server, call `aliyun`
-directly from the shell, or bypass the local MCP safety policy.
+Use the local `alibabacloud-core` MCP server tools before writing Alibaba
+Cloud interaction code. Do not start another MCP server or call `aliyun`
+directly from the shell.
 
-The only allowed tool for OpenAPI Explorer access is:
-
-- `mcp__alibabacloud-core__AlibabaCloud___CallCLI`
-
-All metadata commands below must be executed through that tool as
-`aliyun openapiexplorer ...` commands. Do not guess product codes, SDK
+Use the MCP Core tools (`AlibabaCloud___SearchApis`, `AlibabaCloud___ListApis`,
+`AlibabaCloud___GetApiDefinition`, `AlibabaCloud___GenerateCLICommand`,
+`AlibabaCloud___CallCLI`) to resolve metadata. Do not guess product codes, SDK
 packages, request models, endpoints, or parameter casing.
 
 ## Workflow
@@ -74,29 +71,28 @@ packages, request models, endpoints, or parameter casing.
    - For a live smoke test, prefer a cheap read-only `Describe*` / `List*` call
      with narrow parameters.
 
-## MCP Commands
+## MCP Tool Usage
 
-Invoke these commands only through
-`mcp__alibabacloud-core__AlibabaCloud___CallCLI`:
+Use the MCP Core tools directly:
+
+- `AlibabaCloud___ListProducts` — resolve product code and default API version.
+- `AlibabaCloud___SearchApis` — find APIs by natural language description.
+- `AlibabaCloud___GetApiDefinition` — get full parameter spec, response schema,
+  and error codes for a specific API.
+- `AlibabaCloud___GenerateCLICommand` — produce a validated CLI command from API
+  definition and parameters.
+- `AlibabaCloud___CallCLI` — execute CLI commands for metadata queries (e.g.,
+  `aliyun openapiexplorer get-code-sample ...`).
+
+For SDK dependency and code sample retrieval, use `CallCLI` with:
 
 ```bash
-aliyun openapiexplorer list-products --filter Ecs
-aliyun openapiexplorer get-product-endpoints --product Ecs
-aliyun openapiexplorer get-api-definition --product Ecs --biz-api-version 2014-05-26 --api DescribeInstances
 aliyun openapiexplorer get-sdk-dependencies --product Ecs --biz-language python --biz-version 2014-05-26 --call-type typed
 aliyun openapiexplorer get-code-sample --product Ecs --api-name DescribeInstances --biz-language python --biz-api-version 2014-05-26 --biz-region-id cn-hangzhou --call-type typed --params '{"RegionId":"cn-hangzhou"}'
 ```
 
-Important CLI parameter names:
-
-- `get-api-definition` uses `--api` and `--biz-api-version`.
-- `get-sdk-dependencies` uses `--biz-language`, `--biz-version`, and
-  `--call-type`.
-- `get-code-sample` uses `--api-name`, `--biz-language`,
-  `--biz-api-version`, `--biz-region-id`, `--call-type`, and `--params`.
-
-If the local MCP tool is unavailable or denies a command, stop and report the
-denial. Do not fall back to shell execution or another MCP server.
+If an MCP tool is unavailable or denies a command, stop and report the denial.
+Do not fall back to shell execution or another MCP server.
 
 ## Guardrails
 
