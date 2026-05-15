@@ -40,6 +40,7 @@ All IaCService APIs are invoked through `AlibabaCloud___CallCLI`:
 ### Step 1: Understand the User's Intent
 
 Parse the user's request to identify:
+
 - Target Alibaba Cloud service(s) (e.g., ECS, VPC, RDS, OSS, SLB, ACK)
 - Desired infrastructure (e.g., create a VPC with subnets, launch an ECS instance)
 - Specific requirements (e.g., region, instance type, CIDR blocks, security group rules)
@@ -55,6 +56,7 @@ If the request spans multiple products, query each product separately.
 ### Step 3: Get Resource Type Schema
 
 Call `AlibabaCloud___CallCLI` with `aliyun iacservice get-resource-type --resource-type <resourceType>` to retrieve:
+
 - All required and optional attributes
 - Attribute types, constraints, and valid values
 - Attribute dependencies or conflicts
@@ -69,6 +71,7 @@ Documentation lookup is a two-step process:
 **Important:** Always search first to get valid URLs. Do NOT pass arbitrary URLs to `ReadDocument`.
 
 After reading documentation:
+
 - Review usage examples and best practices
 - Understand attribute-level details not captured in the schema
 - Check for known limitations or caveats
@@ -89,6 +92,7 @@ Based on gathered information:
 ### Step 6: Present the Code
 
 Present the generated HCL with:
+
 - A brief explanation of the infrastructure being created
 - A list of resources and their relationships
 - Variables the user needs to customize
