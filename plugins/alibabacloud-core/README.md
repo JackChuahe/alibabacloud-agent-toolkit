@@ -53,5 +53,6 @@ environments, configure a safety policy to restrict the callable command set:
 | Skill | Description |
 |-------|-------------|
 | `alibabacloud-sdk-usage` | Generate or modify Alibaba Cloud SDK code using OpenAPI metadata |
+| `alibabacloud-terraform-usage` | Generate and modify Alibaba Cloud Terraform HCL configurations |
 | `alibabacloud-multi-account-query` | Query resources across RD member accounts by alias |
 | `alibabacloud-mcp-core-best-practices` | Shared reference for MCP Core tool usage patterns |
