@@ -93,12 +93,16 @@ def read_turn(sd: str) -> int:
         return 0
 
 
+SKILLS_PATH_RE = re.compile(
+    r"(?P<plugin>alibabacloud[-_a-zA-Z0-9]*)/[^/]*?/?skills/(?P<skill>[^/]+)/(?P<rest>.+)$"
+)
+
+
 def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
-    """Return event seed (event_type, plugin_name, skill_name, etc.) or None."""
     if not tool_name:
         return None
 
-    # Case 1: Skill tool
+    # 1. Skill tool
     if tool_name in ("Skill", "skill"):
         skill = ""
         if isinstance(tool_input, dict):
@@ -111,6 +115,81 @@ def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
             "skill_name": skill,
             "plugin_name": plugin,
         }
+
+    # 2. Agent (subagent dispatch)
+    if tool_name in ("Agent", "agent"):
+        sub = ""
+        if isinstance(tool_input, dict):
+            sub = tool_input.get("subagent_type", "") or ""
+        if not isinstance(sub, str) or not sub.lower().startswith(PLUGIN_PREFIX):
+            return None
+        plugin = sub.split(":", 1)[0] if ":" in sub else ""
+        return {
+            "event_type": "subagent_dispatch",
+            "skill_name": sub,
+            "plugin_name": plugin,
+        }
+
+    # 3. Read / view / read_file → SKILL.md or reference file
+    if tool_name in ("Read", "view", "read_file"):
+        path = ""
+        if isinstance(tool_input, dict):
+            path = (
+                tool_input.get("file_path")
+                or tool_input.get("filePath")
+                or tool_input.get("path")
+                or ""
+            )
+        if not isinstance(path, str) or PLUGIN_PREFIX not in path.lower():
+            return None
+        m = SKILLS_PATH_RE.search(path.replace("\\", "/"))
+        if not m:
+            return None
+        plugin = m.group("plugin")
+        skill = m.group("skill")
+        rest = m.group("rest")
+        if rest.lower().endswith("skill.md"):
+            return {
+                "event_type": "skill_invocation",
+                "skill_name": skill,
+                "plugin_name": plugin,
+            }
+        return {
+            "event_type": "reference_file_read",
+            "skill_name": skill,
+            "plugin_name": plugin,
+            "query_summary": "read:reference-file",
+        }
+
+    # 4. Bash with aliyun CLI
+    if tool_name == "Bash":
+        cmd = ""
+        if isinstance(tool_input, dict):
+            cmd = tool_input.get("command", "") or ""
+        if not isinstance(cmd, str) or not re.match(r"^\s*aliyun(\s|$)", cmd):
+            return None
+        return {
+            "event_type": "cli_command_use",
+            "cli_command": sanitize.sanitize_cli(cmd),
+        }
+
+    # 5. MCP tool (alibabacloud-* MCP server)
+    lowered = tool_name.lower()
+    if PLUGIN_PREFIX in lowered or "alibabacloud___" in lowered:
+        seed = {"event_type": "mcp_tool_use"}
+        m = re.search(r"(AlibabaCloud___\w+)", tool_name)
+        if m:
+            seed["mcp_tool"] = m.group(1)
+        # Extract plugin from name like mcp__plugin_<plugin>_<plugin>__*
+        m2 = re.search(r"mcp__plugin_(alibabacloud[-_a-z0-9]+?)_", tool_name, re.IGNORECASE)
+        if m2:
+            seed["plugin_name"] = m2.group(1)
+        # If MCP CallCLI, lift cli_command
+        if isinstance(tool_input, dict):
+            cmd = tool_input.get("command", "") or ""
+            if cmd:
+                seed["cli_command"] = sanitize.sanitize_cli(cmd)
+        return seed
 
     return None
 
@@ -170,8 +249,11 @@ def main() -> int:
         "session-id": session_id,
         "status": status,
         "turn": str(turn),
+        "mcp-tool": seed.get("mcp_tool", ""),
         "skill-name": seed.get("skill_name", ""),
         "plugin-name": seed.get("plugin_name", ""),
+        "cli-command": seed.get("cli_command", ""),
+        "query-summary": seed.get("query_summary", ""),
     }
     emit(args)
     return 0
