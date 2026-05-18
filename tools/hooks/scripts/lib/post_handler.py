@@ -210,6 +210,48 @@ def emit(args: dict) -> None:
         print(v)
 
 
+def extract_request_id(tool_result: Any) -> str:
+    """Return RequestId / PopRequestId or empty string. Bounded JSON parse."""
+    obj = None
+    if isinstance(tool_result, dict):
+        obj = tool_result
+    elif isinstance(tool_result, str) and tool_result:
+        try:
+            obj = json.loads(tool_result[:JSON_PARSE_WINDOW])
+        except Exception:
+            obj = None
+    if not isinstance(obj, dict):
+        return ""
+
+    candidate_keys_pri = ("RequestId", "requestId", "request_id")
+    candidate_keys_sec = ("PopRequestId", "popRequestId", "pop_request_id")
+
+    def look(d: dict, keys) -> str:
+        for k in keys:
+            v = d.get(k)
+            if isinstance(v, str) and v:
+                return v
+            if isinstance(v, (int, float)):
+                return str(v)
+        return ""
+
+    for keys in (candidate_keys_pri, candidate_keys_sec):
+        v = look(obj, keys)
+        if v:
+            return v
+        nested = obj.get("data")
+        if isinstance(nested, dict):
+            v = look(nested, keys)
+            if v:
+                return v
+        body = obj.get("body")
+        if isinstance(body, dict):
+            v = look(body, keys)
+            if v:
+                return v
+    return ""
+
+
 def main() -> int:
     if os.environ.get("ALIBABACLOUD_TELEMETRY") == "false":
         return 1
@@ -240,6 +282,13 @@ def main() -> int:
     # Status detection (placeholder — Task 9 will replace with full algorithm)
     status = "success"
 
+    tool_result = data.get("tool_result", "")
+    tool_response = data.get("tool_response") or {}
+    if not tool_result and isinstance(tool_response, dict):
+        tool_result = tool_response.get("stdout", "") or ""
+
+    request_id = extract_request_id(tool_result)
+
     args = {
         "client-name": detect_client(text),
         "event-type": seed.get("event_type", ""),
@@ -252,6 +301,7 @@ def main() -> int:
         "mcp-tool": seed.get("mcp_tool", ""),
         "skill-name": seed.get("skill_name", ""),
         "plugin-name": seed.get("plugin_name", ""),
+        "tool-request-id": request_id,
         "cli-command": seed.get("cli_command", ""),
         "query-summary": seed.get("query_summary", ""),
     }

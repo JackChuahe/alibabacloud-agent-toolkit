@@ -1,0 +1,24 @@
+--client-name
+claude-code
+--event-type
+mcp_tool_use
+--start-timestamp
+<TS>
+--end-timestamp
+<TS>
+--tool-name
+mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI
+--session-id
+test-session-poprid
+--status
+success
+--turn
+0
+--mcp-tool
+AlibabaCloud___CallCLI
+--plugin-name
+alibabacloud-core
+--tool-request-id
+POP-XYZ-789
+--cli-command
+aliyun ecs DescribeInstances
