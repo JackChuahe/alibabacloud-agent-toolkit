@@ -252,6 +252,101 @@ def extract_request_id(tool_result: Any) -> str:
     return ""
 
 
+ALIYUN_ERROR_CODES_RE = re.compile(
+    r"\b(InvalidParameter|NoPermission|Forbidden|AccessDenied|"
+    r"InvalidAccessKey[A-Za-z]*|Unauthorized|RequestTimeout|"
+    r"ServiceUnavailable|InternalError|Throttling|QuotaExceeded)\b"
+)
+CLIENT_ERROR_RE = re.compile(
+    r"(Connection refused|EOF\b|\btimeout\b|failed to|unreachable|"
+    r"connection reset|no route to host)",
+    re.IGNORECASE,
+)
+
+
+def _scan_dict_for_error(d: dict) -> Optional[str]:
+    if not isinstance(d, dict):
+        return None
+    if d.get("isError") is True:
+        msg = d.get("error") or d.get("message") or "isError=true"
+        if isinstance(msg, dict):
+            return msg.get("Message") or msg.get("message") or "isError=true"
+        return str(msg)
+    if d.get("Code") or d.get("error") or d.get("Error"):
+        return (
+            d.get("Message")
+            or d.get("message")
+            or (d.get("error") if isinstance(d.get("error"), str) else "")
+            or str(d.get("Code") or d.get("Error") or "")
+        )
+    status = d.get("status")
+    if isinstance(status, str) and status.lower() in ("errored", "error", "failed", "failure"):
+        return d.get("Message") or d.get("message") or f"status: {status}"
+    return None
+
+
+def detect_status(data: dict) -> tuple[str, str]:
+    """Return ("success" | "failure", error_message_sanitized_or_empty)."""
+    tool_response = data.get("tool_response") or {}
+    tool_error = data.get("tool_error") or data.get("error") or ""
+    tool_result = data.get("tool_result", "")
+    if not tool_result and isinstance(tool_response, dict):
+        tool_result = tool_response.get("stdout", "") or ""
+
+    def _result_message() -> str:
+        """Extract the most informative error message from tool_result."""
+        if isinstance(tool_result, dict):
+            return _scan_dict_for_error(tool_result) or ""
+        if isinstance(tool_result, str) and tool_result:
+            head = tool_result[:JSON_PARSE_WINDOW]
+            try:
+                parsed = json.loads(head)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, dict):
+                m = _scan_dict_for_error(parsed)
+                if m:
+                    return m
+                if ALIYUN_ERROR_CODES_RE.search(head[:ERROR_REGEX_WINDOW]):
+                    return head.split("\n", 1)[0]
+            elif CLIENT_ERROR_RE.search(tool_result[:ERROR_REGEX_WINDOW]):
+                return tool_result.split("\n", 1)[0]
+        return ""
+
+    # Signal 1: tool_response.is_error / status
+    if isinstance(tool_response, dict):
+        if tool_response.get("is_error") is True:
+            msg = (
+                _result_message()
+                or tool_response.get("error")
+                or tool_response.get("stderr")
+                or "tool_response.is_error=true"
+            )
+            return "failure", sanitize.sanitize_error(msg)
+        if str(tool_response.get("status", "")).lower() == "errored":
+            msg = _result_message() or "tool_response.status=Errored"
+            return "failure", sanitize.sanitize_error(msg)
+
+    # Signal 2: top-level tool_error / error
+    if tool_error:
+        return "failure", sanitize.sanitize_error(tool_error)
+
+    # Signal 3: Bash exit_code != 0
+    if isinstance(tool_response, dict):
+        ec = tool_response.get("exit_code")
+        if isinstance(ec, int) and ec != 0:
+            stderr = tool_response.get("stderr") or ""
+            stdout = tool_response.get("stdout") or ""
+            return "failure", sanitize.sanitize_error(stderr or stdout or f"exit_code={ec}")
+
+    # Signal 4: parse tool_result (bounded)
+    msg = _result_message()
+    if msg:
+        return "failure", sanitize.sanitize_error(msg)
+
+    return "success", ""
+
+
 def main() -> int:
     if os.environ.get("ALIBABACLOUD_TELEMETRY") == "false":
         return 1
@@ -279,8 +374,7 @@ def main() -> int:
         start_ms = end_ms - 1
     turn = read_turn(sd)
 
-    # Status detection (placeholder — Task 9 will replace with full algorithm)
-    status = "success"
+    status, error_message = detect_status(data)
 
     tool_result = data.get("tool_result", "")
     tool_response = data.get("tool_response") or {}
@@ -304,6 +398,7 @@ def main() -> int:
         "tool-request-id": request_id,
         "cli-command": seed.get("cli_command", ""),
         "query-summary": seed.get("query_summary", ""),
+        "error-message": error_message,
     }
     emit(args)
     return 0
