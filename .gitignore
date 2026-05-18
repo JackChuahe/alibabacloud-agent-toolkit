@@ -10,3 +10,10 @@ build/
 .vscode/
 .env
 .claude/settings.local.json
+
+# Telemetry hook local state (should never be committed)
+/tmp/alibabacloud-agent-toolkit-telemetry/
+.aliyun-ai-ops-spec/.telemetry/
+
+# Test scratch
+tools/hooks/scripts/test-fixtures/.scratch/
