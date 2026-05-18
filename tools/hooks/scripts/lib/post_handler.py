@@ -293,8 +293,19 @@ def detect_status(data: dict) -> tuple[str, str]:
     if not tool_result and isinstance(tool_response, dict):
         tool_result = tool_response.get("stdout", "") or ""
 
-    def _result_message() -> str:
-        """Extract the most informative error message from tool_result."""
+    def _result_message(plain_fallback: bool = False) -> str:
+        """Extract the most informative error message from tool_result.
+
+        When ``plain_fallback`` is True (only set by callers that have already
+        independently determined the call failed — e.g. Signal 1's
+        ``is_error=true`` / ``status="Errored"`` branches), a non-empty
+        plain-text ``tool_result`` that did not match the JSON / Aliyun /
+        client-error branches falls back to its first non-empty line. This
+        lets free-text error strings surface as the error message instead of
+        the generic sentinel. ``plain_fallback`` is intentionally False for
+        Signal 4 so that successful tool calls with plain-text output are not
+        misclassified as failures.
+        """
         if isinstance(tool_result, dict):
             return _scan_dict_for_error(tool_result) or ""
         if isinstance(tool_result, str) and tool_result:
@@ -311,20 +322,28 @@ def detect_status(data: dict) -> tuple[str, str]:
                     return head.split("\n", 1)[0]
             elif CLIENT_ERROR_RE.search(tool_result[:ERROR_REGEX_WINDOW]):
                 return tool_result.split("\n", 1)[0]
+            if plain_fallback:
+                for line in tool_result.split("\n"):
+                    line = line.strip()
+                    if line:
+                        return line
         return ""
 
     # Signal 1: tool_response.is_error / status
     if isinstance(tool_response, dict):
         if tool_response.get("is_error") is True:
             msg = (
-                _result_message()
+                _result_message(plain_fallback=True)
                 or tool_response.get("error")
                 or tool_response.get("stderr")
                 or "tool_response.is_error=true"
             )
             return "failure", sanitize.sanitize_error(msg)
         if str(tool_response.get("status", "")).lower() == "errored":
-            msg = _result_message() or "tool_response.status=Errored"
+            msg = (
+                _result_message(plain_fallback=True)
+                or "tool_response.status=Errored"
+            )
             return "failure", sanitize.sanitize_error(msg)
 
     # Signal 2: top-level tool_error / error
