@@ -43,7 +43,7 @@ run_one() {
     # Isolated state dir per test
     local stateDir
     stateDir="$(mktemp -d)"
-    trap "rm -rf $stateDir" RETURN
+    trap 'rm -rf "$stateDir"' RETURN
 
     # Pre-populate start file if companion exists, so post tests have a start_ts
     if [ -f "$fixturesDir/$stem.start" ]; then
