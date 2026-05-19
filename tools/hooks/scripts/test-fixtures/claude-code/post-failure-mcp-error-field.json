@@ -1,0 +1,11 @@
+{
+  "hook_event_name": "PostToolUseFailure",
+  "session_id": "test-session-errfield",
+  "tool_use_id": "toolu_errfield",
+  "tool_name": "mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI",
+  "tool_input": {"command": "aliyun vpc DeleteVSwitch"},
+  "tool_response": {
+    "is_error": true,
+    "error": "{\"data\":{\"requestId\":\"abc12345-1111-2222-3333-444444444444\",\"popRequestId\":\"XYZ789AB-1111-2222-3333-444444444444\",\"summary\":\"failed\"}}"
+  }
+}

@@ -194,51 +194,130 @@ def emit(args: dict) -> None:
         print(v)
 
 
-def extract_request_id(tool_result: Any) -> str:
-    """Return RequestId / PopRequestId or empty string. Bounded JSON parse."""
-    obj = None
-    if isinstance(tool_result, dict):
-        obj = tool_result
-    elif isinstance(tool_result, str) and tool_result:
-        try:
-            obj = json.loads(tool_result[:JSON_PARSE_WINDOW])
-        except Exception:
-            obj = None
-    if not isinstance(obj, dict):
+_REQUEST_ID_KEYS_PRIMARY = ("RequestId", "requestId", "request_id")
+_REQUEST_ID_KEYS_SECONDARY = ("PopRequestId", "popRequestId", "pop_request_id")
+_REQUEST_ID_NESTED_PATHS = ("data", "body", "error", "result")
+
+# Match a labelled RequestId / PopRequestId followed by an UUID-shaped value.
+# Case-insensitive label, value preserved verbatim. Accepts both ":" and "=".
+_REQUEST_ID_RE = re.compile(
+    r'(?i)(?P<label>pop[-_]?request[-_]?id|request[-_]?id)'
+    r'\s*["\']?\s*[:=]\s*["\']?'
+    r'(?P<value>[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})'
+)
+
+
+def _search_dict_for_request_id(d: Any) -> str:
+    """Walk known dict paths looking for RequestId / PopRequestId."""
+    if not isinstance(d, dict):
         return ""
 
-    candidate_keys_pri = ("RequestId", "requestId", "request_id")
-    candidate_keys_sec = ("PopRequestId", "popRequestId", "pop_request_id")
-
-    def look(d: dict, keys) -> str:
+    def look(node: dict, keys) -> str:
         for k in keys:
-            v = d.get(k)
+            v = node.get(k)
             if isinstance(v, str) and v:
                 return v
             if isinstance(v, (int, float)):
                 return str(v)
         return ""
 
-    for keys in (candidate_keys_pri, candidate_keys_sec):
-        v = look(obj, keys)
+    for keys in (_REQUEST_ID_KEYS_PRIMARY, _REQUEST_ID_KEYS_SECONDARY):
+        v = look(d, keys)
         if v:
             return v
-        nested = obj.get("data")
-        if isinstance(nested, dict):
-            v = look(nested, keys)
-            if v:
-                return v
-        body = obj.get("body")
-        if isinstance(body, dict):
-            v = look(body, keys)
-            if v:
-                return v
-        # Aliyun MCP CallCLI failure shape: {"isError":true,"error":{"RequestId":"..."}}
-        err = obj.get("error")
-        if isinstance(err, dict):
-            v = look(err, keys)
-            if v:
-                return v
+        for nested_key in _REQUEST_ID_NESTED_PATHS:
+            nested = d.get(nested_key)
+            if isinstance(nested, dict):
+                v = look(nested, keys)
+                if v:
+                    return v
+    return ""
+
+
+def _regex_extract_request_id(text: str) -> str:
+    """Find the first labelled RequestId / PopRequestId in raw text.
+
+    RequestId family wins over PopRequestId family when both are present.
+    """
+    primary = ""
+    secondary = ""
+    for match in _REQUEST_ID_RE.finditer(text):
+        label = match.group("label").lower()
+        value = match.group("value")
+        is_pop = "pop" in label
+        if is_pop and not secondary:
+            secondary = value
+        elif not is_pop and not primary:
+            primary = value
+            break  # primary wins, stop scanning
+    return primary or secondary
+
+
+def _try_parse_for_request_id(s: str) -> str:
+    """Best-effort JSON parse of *s*; search resulting dict / list."""
+    try:
+        obj = json.loads(s)
+    except Exception:
+        return ""
+    if isinstance(obj, dict):
+        return _search_dict_for_request_id(obj)
+    if isinstance(obj, list):
+        for item in obj[:5]:
+            if isinstance(item, dict):
+                rid = _search_dict_for_request_id(item)
+                if rid:
+                    return rid
+                # MCP content envelope: {"type":"text","text":"..."}
+                inner = item.get("text") or item.get("content")
+                if isinstance(inner, str) and inner:
+                    rid = _extract_request_id_from_text(inner)
+                    if rid:
+                        return rid
+    return ""
+
+
+def _extract_request_id_from_text(text: str) -> str:
+    """Run the three text strategies on *text* (already bounded by caller)."""
+    # Strategy 1: pure JSON parse
+    rid = _try_parse_for_request_id(text)
+    if rid:
+        return rid
+    # Strategy 2: parse from the first '{' (handles text-prefixed JSON like
+    # "调用成功，但结果是空。\n\n{...}")
+    brace_idx = text.find("{")
+    if brace_idx > 0:
+        rid = _try_parse_for_request_id(text[brace_idx:])
+        if rid:
+            return rid
+    # Strategy 3: regex extraction directly on the text
+    return _regex_extract_request_id(text)
+
+
+def extract_request_id(tool_result: Any) -> str:
+    """Return RequestId / PopRequestId or empty string. Multi-strategy.
+
+    Accepts dict / list / string. For strings: tries pure JSON, then
+    parse-from-first-brace, then regex. For lists: walks MCP envelope
+    items. Bounded to JSON_PARSE_WINDOW bytes for parsing strategies.
+    """
+    if not tool_result:
+        return ""
+    if isinstance(tool_result, dict):
+        return _search_dict_for_request_id(tool_result)
+    if isinstance(tool_result, list):
+        for item in tool_result[:5]:
+            if isinstance(item, dict):
+                rid = _search_dict_for_request_id(item)
+                if rid:
+                    return rid
+                inner = item.get("text") or item.get("content")
+                if isinstance(inner, str) and inner:
+                    rid = _extract_request_id_from_text(inner[:JSON_PARSE_WINDOW])
+                    if rid:
+                        return rid
+        return ""
+    if isinstance(tool_result, str):
+        return _extract_request_id_from_text(tool_result[:JSON_PARSE_WINDOW])
     return ""
 
 
@@ -433,10 +512,24 @@ def main() -> int:
 
     tool_result = data.get("tool_result", "")
     tool_response = data.get("tool_response") or {}
-    if not tool_result and isinstance(tool_response, dict):
-        tool_result = tool_response.get("stdout", "") or ""
 
-    request_id = extract_request_id(tool_result)
+    # Try multiple sources in priority order. The first non-empty extraction wins.
+    # Successes typically have the cloud RequestId in tool_result; failures often
+    # put it in tool_response.error or top-level tool_error.
+    _rid_sources: list = [tool_result]
+    if isinstance(tool_response, dict):
+        _rid_sources.extend([
+            tool_response.get("stdout"),
+            tool_response.get("error"),
+            tool_response.get("stderr"),
+        ])
+    _rid_sources.extend([data.get("tool_error"), data.get("error")])
+
+    request_id = ""
+    for _src in _rid_sources:
+        request_id = extract_request_id(_src)
+        if request_id:
+            break
 
     args = {
         "client-name": client,
