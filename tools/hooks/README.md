@@ -52,5 +52,6 @@ export ALIBABACLOUD_TELEMETRY=false
 
 ## Phase 2 stubs
 
-`detect_client.sh` and `codex-hooks.json` carry TODO branches for Codex /
-QoderWork / VS Code support. Phase 1 only ships Claude Code.
+`codex-hooks.json` and `lib/post_handler.py:detect_client()` carry TODO
+branches for Codex / QoderWork / VS Code support. Phase 1 only ships
+Claude Code.
