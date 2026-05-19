@@ -437,6 +437,26 @@ def detect_status(data: dict) -> tuple[str, str]:
             stdout = tool_response.get("stdout") or ""
             return "failure", sanitize.sanitize_error(stderr or stdout or f"exit_code={ec}")
 
+    # If tool_response is a list (MCP envelope) and we don't have a
+    # tool_result yet, synthesize one from the envelope items so Signal 4
+    # can run.
+    if (not tool_result) and isinstance(tool_response, list):
+        parts = []
+        for item in tool_response[:5]:
+            if isinstance(item, dict):
+                # MCP item-level error flag
+                if item.get("isError") is True or item.get("is_error") is True:
+                    msg = item.get("text") or item.get("content") or "tool_response item is_error=true"
+                    if isinstance(msg, str):
+                        return "failure", sanitize.sanitize_error(msg)
+                inner = item.get("text") or item.get("content")
+                if isinstance(inner, str):
+                    parts.append(inner)
+            elif isinstance(item, str):
+                parts.append(item)
+        if parts:
+            tool_result = "\n".join(parts)
+
     # Signal 4: parse tool_result (bounded)
     msg = _result_message()
     if msg:
@@ -524,12 +544,17 @@ def main() -> int:
     tool_response = data.get("tool_response") or {}
 
     # Try multiple sources in priority order. The first non-empty extraction
-    # wins. Successes from MCP tools typically place the cloud RequestId in
-    # tool_response.content (the MCP-protocol envelope); successful Bash calls
-    # put it in tool_response.stdout; failures put the error JSON in
-    # tool_response.error or top-level tool_error.
+    # wins. Claude Code's PostToolUse payload uses different shapes per tool:
+    #   - MCP success: tool_response is a list (the MCP {content} envelope) and
+    #     tool_result is absent
+    #   - Bash: tool_response is a dict with stdout/stderr/exit_code
+    #   - Failures: tool_response may be a dict with error / is_error fields
     _rid_sources: list = [tool_result]
-    if isinstance(tool_response, dict):
+    if isinstance(tool_response, list):
+        # MCP envelope shape: [{"type":"text","text":"<json>"}]. Pass the list
+        # directly — extract_request_id walks list items and reads text fields.
+        _rid_sources.append(tool_response)
+    elif isinstance(tool_response, dict):
         _rid_sources.extend([
             tool_response.get("content"),   # MCP-protocol envelope (often a list)
             tool_response.get("output"),    # alternative naming
@@ -539,8 +564,9 @@ def main() -> int:
             tool_response.get("stderr"),
         ])
     _rid_sources.extend([data.get("tool_error"), data.get("error")])
-    # Last resort: walk the whole tool_response dict for any RequestId/PopRequestId
-    # under arbitrary nesting (defensive against future schema changes).
+    # Last resort: walk the whole tool_response (dict) for any RequestId /
+    # PopRequestId under arbitrary nesting. List-shaped tool_response was
+    # already added above.
     if isinstance(tool_response, dict):
         _rid_sources.append(tool_response)
 
