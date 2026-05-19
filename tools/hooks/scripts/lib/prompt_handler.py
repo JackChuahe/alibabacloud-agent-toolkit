@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""User-prompt-submit hook handler.
+
+Detects direct slash-style skill invocations (`/alibabacloud-*:<skill> ...`)
+which Claude Code submits as plain prompts rather than invoking the Skill
+tool. Emits a `skill_invocation` event so these are visible in telemetry
+alongside Skill-tool and SKILL.md-read invocations.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import sys
+import time
+from typing import Any, Optional
+
+# Make sibling modules importable when run directly
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import sanitize  # noqa: E402
+from state import SessionState  # noqa: E402
+
+STDIN_CAP = 65536
+DEBUG = os.environ.get("ALIBABACLOUD_TELEMETRY_DEBUG") == "1"
+
+# Match a slash-style skill invocation at the start of a prompt:
+#   /alibabacloud-core:alibabacloud-sdk-usage args...
+SLASH_SKILL_RE = re.compile(
+    r"^/(?P<plugin>alibabacloud[-a-zA-Z0-9_]*):(?P<skill>[a-zA-Z0-9_-]+)\b"
+)
+
+# Canonical arg order — must match post_handler.emit()
+_EMIT_ORDER = [
+    "client-name", "event-type", "start-timestamp", "end-timestamp",
+    "tool-name", "session-id", "status", "turn",
+    "mcp-tool", "skill-name", "plugin-name", "tool-request-id",
+    "cli-command", "query-summary", "error-message",
+]
+
+
+def _detect_client(payload_str: str) -> str:
+    if os.environ.get("COPILOT_CLI") == "1":
+        return "copilot-cli"
+    if os.environ.get("CODEX_CLI") == "1":
+        return "codex"
+    if os.environ.get("QODER_WORK") == "1":
+        return "qoderwork"
+    if "__vscode" in payload_str:
+        return "vscode"
+    return "claude-code"
+
+
+def _iso_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _emit(args: dict) -> None:
+    for key in _EMIT_ORDER:
+        v = args.get(key)
+        if v is None or v == "":
+            continue
+        print(f"--{key}")
+        print(v)
+
+
+def _debug(msg: str) -> None:
+    if DEBUG:
+        sys.stderr.write(msg if msg.endswith("\n") else msg + "\n")
+
+
+def _classify_prompt(prompt: Any) -> Optional[dict]:
+    if not isinstance(prompt, str) or not prompt:
+        return None
+    match = SLASH_SKILL_RE.match(prompt.strip())
+    if not match:
+        return None
+    plugin = match.group("plugin")
+    skill = match.group("skill")
+    return {
+        "skill_name": f"{plugin}:{skill}",
+        "plugin_name": plugin,
+    }
+
+
+def main() -> int:
+    if os.environ.get("ALIBABACLOUD_TELEMETRY") == "false":
+        _debug("[prompt] decision=opted-out")
+        return 1
+    raw = sys.stdin.buffer.read(STDIN_CAP)
+    if not raw:
+        _debug("[prompt] decision=skip reason=empty-stdin")
+        return 1
+    text = raw.decode("utf-8", errors="replace")
+    try:
+        data = json.loads(text)
+    except Exception:
+        _debug("[prompt] decision=skip reason=invalid-json")
+        return 1
+    prompt = data.get("prompt") or ""
+    session_id = data.get("session_id") or ""
+    if not session_id:
+        _debug("[prompt] decision=skip reason=empty-session-id")
+        return 1
+
+    seed = _classify_prompt(prompt)
+    if seed is None:
+        _debug("[prompt] decision=skip reason=not-slash-skill")
+        return 1
+
+    client = _detect_client(text)
+
+    # Read turn (read-only — Stop hook owns increments)
+    turn = 0
+    try:
+        with SessionState(client, session_id) as st:
+            turn = int(st.data.get("turn", 0))
+    except Exception:
+        pass
+
+    now = _iso_now()
+    args = {
+        "client-name": client,
+        "event-type": "skill_invocation",
+        "start-timestamp": now,
+        "end-timestamp": now,
+        "tool-name": "UserPromptSubmit",
+        "session-id": session_id,
+        "status": "success",
+        "turn": str(turn),
+        "skill-name": seed["skill_name"],
+        "plugin-name": seed["plugin_name"],
+    }
+    _emit(args)
+
+    _debug(
+        f"[prompt] tool=UserPromptSubmit decision=upload "
+        f"event=skill_invocation skill={seed['skill_name']} "
+        f"plugin={seed['plugin_name']} session={session_id} client={client}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

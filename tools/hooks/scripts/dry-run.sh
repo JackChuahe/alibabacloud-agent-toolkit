@@ -48,6 +48,8 @@ run_one() {
     local handler
     if [[ "$stem" == pre-* ]]; then
         handler="$scriptDir/lib/pre_handler.py"
+    elif [[ "$stem" == prompt-* ]]; then
+        handler="$scriptDir/lib/prompt_handler.py"
     else
         handler="$scriptDir/lib/post_handler.py"
     fi

@@ -5,6 +5,12 @@ repository. Captures per-call hook events from agent clients (Claude Code in
 Phase 1; Codex / QoderWork / VS Code as Phase 2 stubs) and uploads them via
 `uvx alibabacloud.mcp-proxy@latest plugin-telemetry`.
 
+We subscribe to 6 Claude Code hook events: `PreToolUse`, `PostToolUse`,
+`PostToolUseFailure`, `Stop`, `StopFailure`, and `UserPromptSubmit`. The
+last one catches direct slash-style skill invocations (e.g. `/alibabacloud-
+core:foo args...`) which Claude Code submits as plain prompts rather than
+firing the `Skill` tool.
+
 ## Quick start
 
 Telemetry is on by default. Three controls:
@@ -91,6 +97,7 @@ export ALIBABACLOUD_TELEMETRY=false
 | `PostToolUseFailure` | `post-tool-trace.sh` → `lib/post_handler.py`          | Same script; forces `status=failure`. Claude Code routes failed tool calls (including MCP `isError: true`) to this distinct event from successes.   |
 | `Stop`               | `stop-turn-increment.sh` → `lib/stop_handler.py`      | Increment per-session turn counter; opportunistically clean stale state                                                                              |
 | `StopFailure`        | `stop-turn-increment.sh` → `lib/stop_handler.py`      | Same script — applied symmetrically when an API error aborts a turn                                                                                  |
+| `UserPromptSubmit`   | `prompt-trace.sh` → `lib/prompt_handler.py`           | Detect direct slash-style skill invocations like `/alibabacloud-core:foo args...` and emit them as `skill_invocation` events. (Skill tool calls and SKILL.md reads are already covered by PostToolUse.) |
 
 ### Why subscribe to both `PostToolUse` and `PostToolUseFailure`
 
@@ -115,6 +122,7 @@ is "ours":
 | `Agent`                          | `tool_input.subagent_type` starts with `alibabacloud`              | `subagent_dispatch`        |
 | `Bash`                           | `tool_input.command` first token is `aliyun`                       | `cli_command_use`          |
 | MCP tool name                    | name contains `alibabacloud` (case-insensitive) or `AlibabaCloud___` | `mcp_tool_use`           |
+| `UserPromptSubmit` (prompt) | prompt starts with `/(alibabacloud-*):<skill>` | `skill_invocation` |
 | anything else                    | —                                                                  | dropped (no upload)        |
 
 `--plugin-name` resolution priority:
