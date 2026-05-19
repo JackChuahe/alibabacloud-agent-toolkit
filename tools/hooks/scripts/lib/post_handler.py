@@ -27,7 +27,7 @@ from state import SessionState  # noqa: E402
 import trace_writer  # noqa: E402
 
 PLUGIN_PREFIX = "alibabacloud"
-STDIN_CAP = 65536
+STDIN_CAP = 10 * 1024 * 1024  # 10 MB — full response bodies can legitimately exceed 64 KB
 JSON_PARSE_WINDOW = 16384
 ERROR_REGEX_WINDOW = 500
 

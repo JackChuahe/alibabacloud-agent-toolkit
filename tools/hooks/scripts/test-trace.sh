@@ -165,4 +165,57 @@ fi
 rm -rf "$traceDir4" "$stateDir4"
 
 echo ""
+echo "=== Test: Response truncation >64KB ==="
+
+export ALIBABACLOUD_TRACE="true"
+traceDir5="$(mktemp -d)"
+export ALIBABACLOUD_TRACE_DIR="$traceDir5"
+
+# Generate a fixture with a huge response (>64KB)
+bigResponse=$(python3 -c "print('x' * 100000)")
+tmpFixture="$(mktemp)"
+cat > "$tmpFixture" <<FIXTURE
+{
+  "session_id": "trace-truncate",
+  "tool_name": "mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI",
+  "tool_use_id": "toolu_big_001",
+  "tool_input": {"command": "aliyun ecs DescribeInstances"},
+  "tool_response": [{"type": "text", "text": "$bigResponse"}],
+  "hook_event_name": "PostToolUse"
+}
+FIXTURE
+
+# Prompt + pre + post + stop
+echo '{"session_id":"trace-truncate","prompt":"big response test","hook_event_name":"UserPromptSubmit"}' | \
+    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+echo '{"session_id":"trace-truncate","tool_name":"mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI","tool_use_id":"toolu_big_001","tool_input":{"command":"aliyun ecs DescribeInstances"},"hook_event_name":"PreToolUse"}' | \
+    python3 "$scriptDir/lib/pre_handler.py" > /dev/null 2>&1 || true
+
+# Seed start marker
+python3 "$scriptDir/lib/state.py" seed-marker --client claude-code --session trace-truncate --key toolu_big_001 --ms 1716100000000
+
+python3 "$scriptDir/lib/post_handler.py" < "$tmpFixture" > /dev/null 2>&1 || true
+echo '{"session_id":"trace-truncate","hook_event_name":"Stop"}' | \
+    python3 "$scriptDir/lib/stop_handler.py" > /dev/null 2>&1 || true
+
+traceFile5="$traceDir5/trace-truncate.jsonl"
+if ! grep -q '"truncated": true' "$traceFile5" 2>/dev/null && ! grep -q '"truncated":true' "$traceFile5" 2>/dev/null; then
+    echo "FAIL: truncated flag not set for >64KB response"
+    if [ -f "$traceFile5" ]; then
+        python3 -c "
+import json
+for line in open('$traceFile5'):
+    r = json.loads(line)
+    if r.get('event') == 'tool_end':
+        print(f'truncated={r.get(\"truncated\")}')
+        print(f'response_len={len(json.dumps(r.get(\"tool_response\", \"\")))}')
+" 2>/dev/null || cat "$traceFile5"
+    fi
+    exit 1
+fi
+echo "PASS: Response truncation >64KB"
+rm -rf "$traceDir5"
+rm -f "$tmpFixture"
+
+echo ""
 echo "=== All trace tests passed ==="
