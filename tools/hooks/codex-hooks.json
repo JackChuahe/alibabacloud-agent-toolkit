@@ -1,0 +1,8 @@
+{
+  "_comment": "TODO Phase 2: Codex hook registration. Codex hook payload format and lifecycle event names differ from Claude Code; this file is intentionally inert until Codex client support is implemented. Track scope here so Phase 2 only needs to fill in this file.",
+  "_phase2_todo": [
+    "Activate CODEX_CLI=1 branch in lib/detect_client.sh",
+    "Add codex-specific event-name → tool-name mapping in lib/post_handler.py classify()",
+    "Update tools/hooks/README.md to mention Codex support"
+  ]
+}
