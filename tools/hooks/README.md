@@ -35,7 +35,7 @@ export ALIBABACLOUD_TELEMETRY=false
 | Variable | Default | Effect |
 |----------|---------|--------|
 | `ALIBABACLOUD_TELEMETRY` | `true` | Set to `false` to disable all hook uploads |
-| `ALIBABACLOUD_TELEMETRY_DEBUG` | `0` | When `1`, capture decisions from all four hook scripts (pre / post / post-failure / stop) into `<state-dir>/debug.log` |
+| `ALIBABACLOUD_TELEMETRY_DEBUG` | `0` | When `1`, capture decisions from all four hook scripts (pre / post / post-failure / stop) into `<state-dir>/<client>/debug.log` |
 | `ALIBABACLOUD_TELEMETRY_DRY_RUN` | `0` | When `1`, log the would-be `uvx` command without executing it |
 | `ALIBABACLOUD_TELEMETRY_STATE_DIR` | `~/.cache/alibabacloud-agent-toolkit/telemetry` | Override state directory |
 
@@ -49,8 +49,30 @@ export ALIBABACLOUD_TELEMETRY=false
 | `PreToolUse` | `scripts/pre-tool-trace.sh` | Record start timestamp |
 | `PostToolUse` | `scripts/post-tool-trace.sh` | Classify, detect status, upload event |
 | `PostToolUseFailure` | `scripts/post-tool-trace.sh` | Same script; forces `status=failure` for tool errors that Claude Code routes to a separate failure event (e.g. MCP `isError=true`) |
-| `Stop` | `scripts/stop-turn-increment.sh` | Increment turn counter, detect session swap |
+| `Stop` | `scripts/stop-turn-increment.sh` | Increment turn counter |
 | `StopFailure` | `scripts/stop-turn-increment.sh` | Same script — applied symmetrically when a turn aborts with an error |
+
+## State Files
+
+State is bucketed per client and per session for safe multi-process and
+multi-client operation:
+
+```
+<state-dir>/
+└── <client-name>/                  # claude-code | codex | qoderwork | vscode
+    ├── debug.log
+    └── sessions/
+        ├── <session-id>.state.json
+        └── <session-id>.lock        # fcntl exclusive lock
+```
+
+`<state-dir>` defaults to `~/.cache/alibabacloud-agent-toolkit/telemetry`,
+falling back to `/tmp/alibabacloud-agent-toolkit-telemetry-<uid>` when the
+home cache is unwritable. Each per-session JSON consolidates the turn
+counter and pending tool-start markers (keyed by `tool_use_id`, with
+sanitized `tool_name` as fallback) into one file guarded by an
+`fcntl.flock` exclusive lock and written atomically via `os.replace`.
+Sessions older than 7 days are auto-cleaned by the Stop hook.
 
 ## Troubleshooting
 
@@ -62,10 +84,11 @@ export ALIBABACLOUD_TELEMETRY_DEBUG=1
 # (optional) export ALIBABACLOUD_TELEMETRY_DRY_RUN=1   # don't actually upload
 ```
 
-Then inspect the merged trace from all four hook scripts:
+Then inspect the merged trace from all four hook scripts (debug logs are
+bucketed per client):
 
 ```bash
-tail -F ~/.cache/alibabacloud-agent-toolkit/telemetry/debug.log
+tail -F ~/.cache/alibabacloud-agent-toolkit/telemetry/claude-code/debug.log
 ```
 
 You will see one structured line per hook fire. Common patterns:
@@ -81,7 +104,7 @@ You will see one structured line per hook fire. Common patterns:
   still uploads it.
 - `[post] event_name=PostToolUse tool=Bash decision=reject reason=bash-not-aliyun cmd_head=ls`
   — post-hook rejected the call because it's not an `aliyun` command.
-- `[stop] turn=3 (post-increment)` — turn counter advanced.
+- `[stop] turn=3 session=<id> client=claude-code` — turn counter advanced.
 
 Reject reasons recognised by `post_handler.py`:
 `opted-out`, `empty-stdin`, `invalid-json`, `empty-tool-name`,

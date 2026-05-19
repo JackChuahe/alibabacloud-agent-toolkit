@@ -2,8 +2,8 @@
 """Pre-tool-use hook handler.
 
 Reads hook payload from stdin (bounded to 64 KB), extracts tool_name and
-session_id, writes a start-time marker, and resets turn counter on session
-swap. Silent on any error — never blocks the agent.
+session_id, writes a start-time marker into the per-session state file
+(fcntl-locked, atomic). Silent on any error — never blocks the agent.
 """
 from __future__ import annotations
 
@@ -13,25 +13,12 @@ import re
 import sys
 import time
 
-STATE_DIR_DEFAULT = os.path.expanduser(
-    "~/.cache/alibabacloud-agent-toolkit/telemetry"
-)
-STATE_DIR_FALLBACK = "/tmp/alibabacloud-agent-toolkit-telemetry"
+# Make sibling modules importable when run directly
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from state import SessionState  # noqa: E402
+
 PLUGIN_PREFIX = "alibabacloud"
 STDIN_CAP = 65536
-
-
-def state_dir() -> str:
-    p = os.environ.get("ALIBABACLOUD_TELEMETRY_STATE_DIR") or STATE_DIR_DEFAULT
-    try:
-        os.makedirs(p, exist_ok=True)
-        return p
-    except OSError:
-        try:
-            os.makedirs(STATE_DIR_FALLBACK, exist_ok=True)
-        except OSError:
-            return ""
-        return STATE_DIR_FALLBACK
 
 
 def read_stdin_bounded() -> bytes:
@@ -98,6 +85,22 @@ def _detail(tool_name: str, tool_input) -> str:
     return ""
 
 
+def _detect_client(payload_str: str) -> str:
+    if os.environ.get("COPILOT_CLI") == "1":
+        return "copilot-cli"
+    if os.environ.get("CODEX_CLI") == "1":
+        return "codex"
+    if os.environ.get("QODER_WORK") == "1":
+        return "qoderwork"
+    if "__vscode" in payload_str:
+        return "vscode"
+    return "claude-code"
+
+
+def _sanitize_tool_name(tool_name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", tool_name or "")[:120]
+
+
 def main() -> int:
     if os.environ.get("ALIBABACLOUD_TELEMETRY") == "false":
         _debug("[pre] decision=skip reason=opted-out")
@@ -106,53 +109,34 @@ def main() -> int:
     if not raw:
         _debug("[pre] decision=skip reason=empty-stdin")
         return 0
+    text = raw.decode("utf-8", errors="replace")
     try:
-        data = json.loads(raw.decode("utf-8", errors="replace"))
+        data = json.loads(text)
     except Exception:
         _debug("[pre] decision=skip reason=invalid-json")
         return 0
     tool_name = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
     session_id = data.get("session_id") or ""
+    tool_use_id = data.get("tool_use_id") or ""
     if not is_ours_tool(tool_name, tool_input):
         _debug(
             f"[pre] tool={tool_name or '<none>'} decision=skip reason=not-ours"
         )
         return 0
-
-    sd = state_dir()
-    if not sd:
+    if not session_id:
         _debug(
-            f"[pre] tool={tool_name} decision=skip reason=no-state-dir"
+            f"[pre] tool={tool_name} decision=skip reason=no-session-id"
         )
         return 0
 
-    # Session swap → reset turn
-    if session_id:
-        last_file = os.path.join(sd, "current-session")
-        last = ""
-        if os.path.exists(last_file):
-            try:
-                with open(last_file) as f:
-                    last = f.read().strip()
-            except OSError:
-                pass
-        if session_id != last:
-            try:
-                with open(os.path.join(sd, "turn"), "w") as f:
-                    f.write("0")
-                with open(last_file, "w") as f:
-                    f.write(session_id)
-            except OSError:
-                pass
-
-    # Write start marker keyed by session+tool (sanitize tool name to filename)
-    safe_tool = re.sub(r"[^A-Za-z0-9_-]", "_", tool_name)[:120]
-    start_path = os.path.join(sd, f"{session_id}-{safe_tool}.start")
+    client = _detect_client(text)
+    key = tool_use_id or _sanitize_tool_name(tool_name)
     try:
-        with open(start_path, "w") as f:
-            f.write(str(int(time.time() * 1000)))
-    except OSError:
+        with SessionState(client, session_id) as st:
+            st.data["tool_starts"][key] = int(time.time() * 1000)
+    except Exception:
+        # Best-effort; never crash the agent.
         pass
 
     detail = _detail(tool_name, tool_input)

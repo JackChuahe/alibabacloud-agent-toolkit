@@ -23,28 +23,12 @@ from typing import Any, Optional
 # Make sibling modules importable when run directly
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sanitize  # noqa: E402
+from state import SessionState  # noqa: E402
 
-STATE_DIR_DEFAULT = os.path.expanduser(
-    "~/.cache/alibabacloud-agent-toolkit/telemetry"
-)
-STATE_DIR_FALLBACK = "/tmp/alibabacloud-agent-toolkit-telemetry"
 PLUGIN_PREFIX = "alibabacloud"
 STDIN_CAP = 65536
 JSON_PARSE_WINDOW = 16384
 ERROR_REGEX_WINDOW = 500
-
-
-def state_dir() -> str:
-    p = os.environ.get("ALIBABACLOUD_TELEMETRY_STATE_DIR") or STATE_DIR_DEFAULT
-    try:
-        os.makedirs(p, exist_ok=True)
-        return p
-    except OSError:
-        try:
-            os.makedirs(STATE_DIR_FALLBACK, exist_ok=True)
-            return STATE_DIR_FALLBACK
-        except OSError:
-            return ""
 
 
 def detect_client(payload_str: str) -> str:
@@ -67,30 +51,8 @@ def iso_from_ms(ms: int) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ms / 1000.0))
 
 
-def read_start_ts(sd: str, session_id: str, tool_name: str) -> Optional[int]:
-    if not sd or not session_id or not tool_name:
-        return None
-    safe_tool = re.sub(r"[^A-Za-z0-9_-]", "_", tool_name)[:120]
-    path = os.path.join(sd, f"{session_id}-{safe_tool}.start")
-    if not os.path.exists(path):
-        return None
-    try:
-        with open(path) as f:
-            ms = int(f.read().strip())
-        os.unlink(path)
-        return ms
-    except (OSError, ValueError):
-        return None
-
-
-def read_turn(sd: str) -> int:
-    if not sd:
-        return 0
-    try:
-        with open(os.path.join(sd, "turn")) as f:
-            return int(f.read().strip())
-    except (OSError, ValueError):
-        return 0
+def _sanitize_tool_name(tool_name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]", "_", tool_name or "")[:120]
 
 
 SKILLS_PATH_RE = re.compile(
@@ -425,6 +387,7 @@ def main() -> int:
     tool_name = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
     session_id = data.get("session_id") or ""
+    tool_use_id = data.get("tool_use_id") or ""
     hook_event_name = data.get("hook_event_name") or ""
 
     _debug(f"[post] event_name={hook_event_name or '<none>'} tool={tool_name or '<none>'}")
@@ -441,13 +404,22 @@ def main() -> int:
         )
         return 1
 
-    sd = state_dir()
-    start_ms = read_start_ts(sd, session_id, tool_name)
+    client = detect_client(text)
+    marker_key = tool_use_id or _sanitize_tool_name(tool_name)
+    start_ms = None
+    turn = 0
+    if session_id:
+        try:
+            with SessionState(client, session_id) as st:
+                start_ms = st.data["tool_starts"].pop(marker_key, None)
+                turn = int(st.data.get("turn", 0))
+        except Exception:
+            start_ms = None
+            turn = 0
     end_ms = int(time.time() * 1000)
     fallback_used = start_ms is None
     if fallback_used:
         start_ms = end_ms - 1
-    turn = read_turn(sd)
 
     status, error_message = detect_status(data)
 
@@ -467,7 +439,7 @@ def main() -> int:
     request_id = extract_request_id(tool_result)
 
     args = {
-        "client-name": detect_client(text),
+        "client-name": client,
         "event-type": seed.get("event_type", ""),
         "start-timestamp": iso_from_ms(start_ms),
         "end-timestamp": iso_from_ms(end_ms),

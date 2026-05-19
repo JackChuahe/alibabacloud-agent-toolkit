@@ -57,27 +57,32 @@ run_one() {
     stateDir="$(mktemp -d)"
     trap 'rm -rf "$stateDir"' RETURN
 
-    # Pre-populate start file if companion exists, so post tests have a start_ts.
-    # The companion file holds a single epoch-ms integer; we copy it to the
-    # canonical path that read_start_ts() in post_handler.py expects:
-    #   <stateDir>/<session_id>-<safe_tool_name>.start
-    # where safe_tool_name = re.sub(r"[^A-Za-z0-9_-]", "_", tool_name)[:120].
+    # Pre-populate start marker if companion exists, so post tests have a start_ts.
+    # The companion file holds a single epoch-ms integer; we seed it via the
+    # lib/state.py CLI so the marker key matches what post_handler.py looks
+    # up: tool_use_id (if present in payload) else sanitized tool_name.
     if [ -f "$fixturesDir/$stem.start" ]; then
         FIXTURE_PATH="$fixture" \
         START_SRC="$fixturesDir/$stem.start" \
-        STATE_DIR="$stateDir" \
+        STATE_LIB="$scriptDir/lib/state.py" \
+        ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir" \
         python3 -c '
-import json, re, os
+import json, os, re, subprocess, sys
 with open(os.environ["FIXTURE_PATH"]) as f:
     data = json.load(f)
 session = data.get("session_id", "") or ""
-tool = data.get("tool_name", "") or ""
-safe = re.sub(r"[^A-Za-z0-9_-]", "_", tool)[:120]
+tool_use_id = data.get("tool_use_id", "") or ""
+tool_name = data.get("tool_name", "") or ""
+key = tool_use_id or re.sub(r"[^A-Za-z0-9_-]", "_", tool_name)[:120]
 with open(os.environ["START_SRC"]) as f:
     ms = f.read().strip()
-out = os.path.join(os.environ["STATE_DIR"], session + "-" + safe + ".start")
-with open(out, "w") as f:
-    f.write(ms)
+subprocess.check_call([
+    sys.executable, os.environ["STATE_LIB"], "seed-marker",
+    "--client", "claude-code",
+    "--session", session,
+    "--key", key,
+    "--ms", ms,
+])
 '
     fi
 

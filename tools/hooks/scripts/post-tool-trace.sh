@@ -9,11 +9,41 @@ return_success() {
     exit 0
 }
 
+# Resolve <state-dir>/<client>/ creating it if needed; falls back to
+# /tmp/alibabacloud-agent-toolkit-telemetry-<uid>/<client> when the cache
+# dir is unwritable. Mirrors lib/state.py:client_dir() in shell.
+detect_client_bash() {
+    if [ "$COPILOT_CLI" = "1" ]; then echo "copilot-cli"; return; fi
+    if [ "$CODEX_CLI" = "1" ]; then echo "codex"; return; fi
+    if [ "$QODER_WORK" = "1" ]; then echo "qoderwork"; return; fi
+    case "${1:-}" in *__vscode*) echo "vscode"; return ;; esac
+    echo "claude-code"
+}
+
+state_dir_for_client() {
+    local base="${ALIBABACLOUD_TELEMETRY_STATE_DIR:-$HOME/.cache/alibabacloud-agent-toolkit/telemetry}"
+    if mkdir -p "$base" 2>/dev/null && touch "$base/.probe" 2>/dev/null; then
+        rm -f "$base/.probe"
+    else
+        local uid
+        uid=$(id -u 2>/dev/null || echo 0)
+        base="/tmp/alibabacloud-agent-toolkit-telemetry-$uid"
+        mkdir -p "$base" 2>/dev/null
+    fi
+    local client="${1:-claude-code}"
+    local safe_client
+    safe_client=$(printf '%s' "$client" | LC_ALL=C tr -c 'A-Za-z0-9_-' '_' | head -c 64)
+    local cdir="$base/$safe_client"
+    mkdir -p "$cdir" 2>/dev/null
+    printf '%s' "$cdir"
+}
+
 debug_log() {
     [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ] || return 0
-    local stateDir="${ALIBABACLOUD_TELEMETRY_STATE_DIR:-$HOME/.cache/alibabacloud-agent-toolkit/telemetry}"
-    mkdir -p "$stateDir" 2>/dev/null
-    printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" >> "$stateDir/debug.log" 2>/dev/null
+    local cdir="$1"
+    local msg="$2"
+    [ -n "$cdir" ] || return 0
+    printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$msg" >> "$cdir/debug.log" 2>/dev/null
 }
 
 # Extract --<key> value from a flat key/value args array. Bash 3.2-safe.
@@ -26,13 +56,18 @@ extract_arg() {
     done
 }
 
+# Resolve client + per-client dir up-front (best-effort; no payload yet).
+# We refine after we read stdin so vscode / __vscode patterns can be detected.
+clientGuess=$(detect_client_bash "")
+cdirGuess=$(state_dir_for_client "$clientGuess")
+
 if [ "${ALIBABACLOUD_TELEMETRY}" = "false" ]; then
-    debug_log "decision=opted-out"
+    debug_log "$cdirGuess" "decision=opted-out"
     return_success
 fi
 
 if [ -t 0 ]; then
-    debug_log "decision=no-stdin"
+    debug_log "$cdirGuess" "decision=no-stdin"
     return_success
 fi
 
@@ -42,22 +77,24 @@ scriptDir="$(cd "$(dirname "$0")" && pwd)"
 # bash variable bloat on huge tool_results.
 payload=$(head -c 65536)
 
+# Refine client from the payload (handles vscode case).
+client=$(detect_client_bash "$payload")
+cdir=$(state_dir_for_client "$client")
+
 # Run handler — outputs alternating --key / value lines on success.
 # Capture stdout in a variable (avoids bash 3.2 PIPESTATUS quirks with
 # process substitution). Empty output means the event was filtered.
 # When DEBUG=1, forward python's stderr (structured decision lines) to debug.log
 # so missing-event problems can be diagnosed offline.
 if [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ]; then
-    stateDir="${ALIBABACLOUD_TELEMETRY_STATE_DIR:-$HOME/.cache/alibabacloud-agent-toolkit/telemetry}"
-    mkdir -p "$stateDir" 2>/dev/null
-    output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/post_handler.py" 2>>"$stateDir/debug.log")
+    output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/post_handler.py" 2>>"$cdir/debug.log")
 else
     output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/post_handler.py" 2>/dev/null)
 fi
 rc=$?
 
 if [ "$rc" -ne 0 ] || [ -z "$output" ]; then
-    debug_log "decision=filtered tool_name=$(printf '%s' "$payload" | head -c 200 | tr '\n' ' ')"
+    debug_log "$cdir" "decision=filtered tool_name=$(printf '%s' "$payload" | head -c 200 | tr '\n' ' ')"
     return_success
 fi
 
@@ -80,21 +117,19 @@ done
 
 # Dry-run mode: log instead of upload
 if [ "${ALIBABACLOUD_TELEMETRY_DRY_RUN}" = "1" ]; then
-    stateDir="${ALIBABACLOUD_TELEMETRY_STATE_DIR:-$HOME/.cache/alibabacloud-agent-toolkit/telemetry}"
-    mkdir -p "$stateDir" 2>/dev/null
     {
         printf 'DRYRUN: uvx alibabacloud.mcp-proxy@latest plugin-telemetry'
         for a in "${args[@]}"; do
             printf ' %q' "$a"
         done
         printf '\n'
-    } >> "$stateDir/debug.log" 2>/dev/null
-    debug_log "decision=dryrun event=$(extract_arg --event-type "${args[@]}") tool=$(extract_arg --tool-name "${args[@]}")"
+    } >> "$cdir/debug.log" 2>/dev/null
+    debug_log "$cdir" "decision=dryrun event=$(extract_arg --event-type "${args[@]}") tool=$(extract_arg --tool-name "${args[@]}")"
     return_success
 fi
 
 # Fire-and-forget: detach so the agent loop never waits on uvx.
-debug_log "decision=upload event=$(extract_arg --event-type "${args[@]}") tool=$(extract_arg --tool-name "${args[@]}")"
+debug_log "$cdir" "decision=upload event=$(extract_arg --event-type "${args[@]}") tool=$(extract_arg --tool-name "${args[@]}")"
 ( uvx alibabacloud.mcp-proxy@latest plugin-telemetry "${args[@]}" \
     >/dev/null 2>&1 < /dev/null & ) >/dev/null 2>&1
 disown 2>/dev/null
