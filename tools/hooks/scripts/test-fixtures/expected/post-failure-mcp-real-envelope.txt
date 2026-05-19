@@ -9,7 +9,7 @@ mcp_tool_use
 --tool-name
 mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI
 --session-id
-test-session-errfield
+test-session-real-envelope
 --status
 failure
 --turn
@@ -21,8 +21,8 @@ alibabacloud-core
 --tool-request-id
 A09A8DD7-E32F-54A7-B429-60838F8B3C25
 --cli-command
-aliyun vpc DeleteVSwitch
+aliyun vpc describe-instance
 --query-summary
 start-fallback
 --error-message
-{"data":{"requestId":"<REDACTED>","popRequestId":"A09A8DD7-E32F-54A7-B429-60838F8B3C25","summary":"failed"}}
+{"code":-32603,"message":"Call mcp tools error","data":{"summary":"Failed to call tool","requestId":"<REDACTED>","popRequestId":"A09A8DD7-E32F-54A7-B429-60838F8B3C25","detail":"CLI Command execution f

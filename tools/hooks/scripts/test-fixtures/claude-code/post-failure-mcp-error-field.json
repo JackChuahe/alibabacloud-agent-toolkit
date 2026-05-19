@@ -6,6 +6,6 @@
   "tool_input": {"command": "aliyun vpc DeleteVSwitch"},
   "tool_response": {
     "is_error": true,
-    "error": "{\"data\":{\"requestId\":\"abc12345-1111-2222-3333-444444444444\",\"popRequestId\":\"XYZ789AB-1111-2222-3333-444444444444\",\"summary\":\"failed\"}}"
+    "error": "{\"data\":{\"requestId\":\"544c02aa-4e9b-4f17-bf79-9ec521d300e5\",\"popRequestId\":\"A09A8DD7-E32F-54A7-B429-60838F8B3C25\",\"summary\":\"failed\"}}"
   }
 }

@@ -144,13 +144,33 @@ non-empty line, sanitized, truncated to 200 chars) and emitted as
 
 ### `--tool-request-id` extraction
 
-Looked up in `tool_result` (or Bash `tool_response.stdout` if `tool_result`
-is empty), in priority order:
+Looked up across multiple candidate sources in priority order:
 
-1. `RequestId` / `requestId` / `request_id` (top-level → `data` → `body` → `error`)
-2. `PopRequestId` / `popRequestId` / `pop_request_id` (top-level → `data` → `body`)
+1. `tool_result`
+2. `tool_response.stdout`
+3. `tool_response.error`
+4. `tool_response.stderr`
+5. top-level `tool_error`
+6. top-level `error`
 
-First non-empty value wins. If neither family is present, the field is
+The first non-empty extraction wins. For each source we try (a) pure JSON
+parse, (b) parse from the first `{` (handles text-prefixed JSON like
+`"调用成功，但结果是空。\n\n{...}"`), (c) regex extraction on the raw text.
+
+Within a parsed dict (or raw text), key priority is:
+
+1. **PopRequestId family** — `PopRequestId` / `popRequestId` / `pop_request_id` / `pop-request-id`
+2. **RequestId family** — `RequestId` / `requestId` / `request_id` / `request-id`
+
+PopRequestId wins because in Claude Code MCP error envelopes
+(`{"code":...,"data":{"requestId":"<MCP-internal>","popRequestId":"<cloud>"}}`)
+the `requestId` is the MCP protocol's internal call ID while `popRequestId`
+is the Alibaba Cloud OpenAPI Gateway RequestId — the diagnostic ID worth
+surfacing. Successful responses generally expose only `RequestId` (no Pop
+counterpart) and fall through to the secondary family.
+
+Each family is searched at the top level then nested under `data` / `body`
+/ `error` / `result`. If neither family yields a value, the field is
 omitted (we never generate a caller-side UUID).
 
 ### Sanitization (`lib/sanitize.py`)

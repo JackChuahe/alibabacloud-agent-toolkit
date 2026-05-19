@@ -194,8 +194,17 @@ def emit(args: dict) -> None:
         print(v)
 
 
-_REQUEST_ID_KEYS_PRIMARY = ("RequestId", "requestId", "request_id")
-_REQUEST_ID_KEYS_SECONDARY = ("PopRequestId", "popRequestId", "pop_request_id")
+# Priority: PopRequestId family wins over RequestId family.
+# In MCP error envelopes, `requestId` is the MCP protocol's internal call ID
+# while `popRequestId` is the Alibaba Cloud OpenAPI Gateway RequestId — the
+# diagnostic ID we want to surface. Successful responses typically expose
+# only `RequestId` (no Pop counterpart), so falling through still works.
+_REQUEST_ID_KEYS_PRIMARY = (
+    "PopRequestId", "popRequestId", "pop_request_id", "pop-request-id",
+)
+_REQUEST_ID_KEYS_SECONDARY = (
+    "RequestId", "requestId", "request_id", "request-id",
+)
 _REQUEST_ID_NESTED_PATHS = ("data", "body", "error", "result")
 
 # Match a labelled RequestId / PopRequestId followed by an UUID-shaped value.
@@ -237,7 +246,8 @@ def _search_dict_for_request_id(d: Any) -> str:
 def _regex_extract_request_id(text: str) -> str:
     """Find the first labelled RequestId / PopRequestId in raw text.
 
-    RequestId family wins over PopRequestId family when both are present.
+    PopRequestId family wins over RequestId family when both are present
+    (mirrors the dict-search priority).
     """
     primary = ""
     secondary = ""
@@ -245,11 +255,11 @@ def _regex_extract_request_id(text: str) -> str:
         label = match.group("label").lower()
         value = match.group("value")
         is_pop = "pop" in label
-        if is_pop and not secondary:
-            secondary = value
-        elif not is_pop and not primary:
+        if is_pop and not primary:
             primary = value
             break  # primary wins, stop scanning
+        elif not is_pop and not secondary:
+            secondary = value
     return primary or secondary
 
 
