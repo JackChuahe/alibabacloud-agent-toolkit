@@ -22,5 +22,3 @@ alibabacloud-core
 REQ-ABC-123
 --cli-command
 aliyun ecs DescribeInstances
---query-summary
-start-fallback

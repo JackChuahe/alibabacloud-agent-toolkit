@@ -18,5 +18,3 @@ success
 BASH-REQ-001
 --cli-command
 aliyun ecs DescribeInstances
---query-summary
-start-fallback

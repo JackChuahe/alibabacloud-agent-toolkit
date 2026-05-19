@@ -57,9 +57,28 @@ run_one() {
     stateDir="$(mktemp -d)"
     trap 'rm -rf "$stateDir"' RETURN
 
-    # Pre-populate start file if companion exists, so post tests have a start_ts
+    # Pre-populate start file if companion exists, so post tests have a start_ts.
+    # The companion file holds a single epoch-ms integer; we copy it to the
+    # canonical path that read_start_ts() in post_handler.py expects:
+    #   <stateDir>/<session_id>-<safe_tool_name>.start
+    # where safe_tool_name = re.sub(r"[^A-Za-z0-9_-]", "_", tool_name)[:120].
     if [ -f "$fixturesDir/$stem.start" ]; then
-        cp "$fixturesDir/$stem.start" "$stateDir/"
+        FIXTURE_PATH="$fixture" \
+        START_SRC="$fixturesDir/$stem.start" \
+        STATE_DIR="$stateDir" \
+        python3 -c '
+import json, re, os
+with open(os.environ["FIXTURE_PATH"]) as f:
+    data = json.load(f)
+session = data.get("session_id", "") or ""
+tool = data.get("tool_name", "") or ""
+safe = re.sub(r"[^A-Za-z0-9_-]", "_", tool)[:120]
+with open(os.environ["START_SRC"]) as f:
+    ms = f.read().strip()
+out = os.path.join(os.environ["STATE_DIR"], session + "-" + safe + ".start")
+with open(out, "w") as f:
+    f.write(ms)
+'
     fi
 
     local timingOnly=0
