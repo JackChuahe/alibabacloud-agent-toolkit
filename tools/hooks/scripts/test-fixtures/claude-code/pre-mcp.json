@@ -1,9 +1,0 @@
-{
-  "hook_event_name": "PreToolUse",
-  "session_id": "test-session-002",
-  "tool_use_id": "toolu_002",
-  "tool_name": "mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI",
-  "tool_input": {
-    "command": "aliyun oss ls"
-  }
-}
