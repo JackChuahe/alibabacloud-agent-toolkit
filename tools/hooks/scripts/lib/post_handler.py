@@ -98,9 +98,19 @@ SKILLS_PATH_RE = re.compile(
 )
 
 
-def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
+def classify_with_reason(
+    tool_name: str, tool_input: Any
+) -> tuple[Optional[dict], Optional[str], dict]:
+    """Classify a tool call.
+
+    Returns (seed, reject_reason, extra) where:
+      - seed is a non-empty dict on match (and reject_reason is None)
+      - reject_reason is a stable token on miss (and seed is None)
+      - extra carries optional debug context (e.g. cmd_head for bash-not-aliyun)
+    """
+    extra: dict = {}
     if not tool_name:
-        return None
+        return None, "empty-tool-name", extra
 
     # 1. Skill tool
     if tool_name in ("Skill", "skill"):
@@ -108,13 +118,13 @@ def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
         if isinstance(tool_input, dict):
             skill = tool_input.get("skill", "") or ""
         if not isinstance(skill, str) or not skill.lower().startswith(PLUGIN_PREFIX):
-            return None
+            return None, "non-alibabacloud-skill", extra
         plugin = skill.split(":", 1)[0] if ":" in skill else ""
         return {
             "event_type": "skill_invocation",
             "skill_name": skill,
             "plugin_name": plugin,
-        }
+        }, None, extra
 
     # 2. Agent (subagent dispatch)
     if tool_name in ("Agent", "agent"):
@@ -122,13 +132,13 @@ def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
         if isinstance(tool_input, dict):
             sub = tool_input.get("subagent_type", "") or ""
         if not isinstance(sub, str) or not sub.lower().startswith(PLUGIN_PREFIX):
-            return None
+            return None, "non-alibabacloud-subagent", extra
         plugin = sub.split(":", 1)[0] if ":" in sub else ""
         return {
             "event_type": "subagent_dispatch",
             "skill_name": sub,
             "plugin_name": plugin,
-        }
+        }, None, extra
 
     # 3. Read / view / read_file → SKILL.md or reference file
     if tool_name in ("Read", "view", "read_file"):
@@ -141,10 +151,10 @@ def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
                 or ""
             )
         if not isinstance(path, str) or PLUGIN_PREFIX not in path.lower():
-            return None
+            return None, "read-no-alibabacloud-segment", extra
         m = SKILLS_PATH_RE.search(path.replace("\\", "/"))
         if not m:
-            return None
+            return None, "read-not-in-skills-path", extra
         plugin = m.group("plugin")
         skill = m.group("skill")
         rest = m.group("rest")
@@ -153,13 +163,13 @@ def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
                 "event_type": "skill_invocation",
                 "skill_name": skill,
                 "plugin_name": plugin,
-            }
+            }, None, extra
         return {
             "event_type": "reference_file_read",
             "skill_name": skill,
             "plugin_name": plugin,
             "query_summary": "read:reference-file",
-        }
+        }, None, extra
 
     # 4. Bash with aliyun CLI
     if tool_name == "Bash":
@@ -167,11 +177,17 @@ def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
         if isinstance(tool_input, dict):
             cmd = tool_input.get("command", "") or ""
         if not isinstance(cmd, str) or not re.match(r"^\s*aliyun(\s|$)", cmd):
-            return None
+            head_token = ""
+            if isinstance(cmd, str) and cmd.strip():
+                head_token = cmd.strip().split()[0]
+                # Sanitize: keep alnum, dash, underscore, dot only; cap at 32 chars.
+                head_token = re.sub(r"[^A-Za-z0-9._-]", "_", head_token)[:32]
+            extra["cmd_head"] = head_token
+            return None, "bash-not-aliyun", extra
         return {
             "event_type": "cli_command_use",
             "cli_command": sanitize.sanitize_cli(cmd),
-        }
+        }, None, extra
 
     # 5. MCP tool (alibabacloud-* MCP server)
     lowered = tool_name.lower()
@@ -189,9 +205,15 @@ def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
             cmd = tool_input.get("command", "") or ""
             if cmd:
                 seed["cli_command"] = sanitize.sanitize_cli(cmd)
-        return seed
+        return seed, None, extra
 
-    return None
+    return None, "unknown-tool", extra
+
+
+def classify(tool_name: str, tool_input: Any) -> Optional[dict]:
+    """Backwards-compatible wrapper around :func:`classify_with_reason`."""
+    seed, _, _ = classify_with_reason(tool_name, tool_input)
+    return seed
 
 
 def emit(args: dict) -> None:
@@ -247,6 +269,12 @@ def extract_request_id(tool_result: Any) -> str:
         body = obj.get("body")
         if isinstance(body, dict):
             v = look(body, keys)
+            if v:
+                return v
+        # Aliyun MCP CallCLI failure shape: {"isError":true,"error":{"RequestId":"..."}}
+        err = obj.get("error")
+        if isinstance(err, dict):
+            v = look(err, keys)
             if v:
                 return v
     return ""
@@ -366,24 +394,51 @@ def detect_status(data: dict) -> tuple[str, str]:
     return "success", ""
 
 
+def _debug_enabled() -> bool:
+    return os.environ.get("ALIBABACLOUD_TELEMETRY_DEBUG") == "1"
+
+
+def _debug(msg: str) -> None:
+    if _debug_enabled():
+        try:
+            sys.stderr.write(msg + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+
 def main() -> int:
     if os.environ.get("ALIBABACLOUD_TELEMETRY") == "false":
+        _debug("[post] decision=reject reason=opted-out")
         return 1
     raw = sys.stdin.buffer.read(STDIN_CAP)
     if not raw:
+        _debug("[post] decision=reject reason=empty-stdin")
         return 1
     try:
         text = raw.decode("utf-8", errors="replace")
         data = json.loads(text)
     except Exception:
+        _debug("[post] decision=reject reason=invalid-json")
         return 1
 
     tool_name = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
     session_id = data.get("session_id") or ""
+    hook_event_name = data.get("hook_event_name") or ""
 
-    seed = classify(tool_name, tool_input)
+    _debug(f"[post] event_name={hook_event_name or '<none>'} tool={tool_name or '<none>'}")
+
+    seed, reject_reason, extra = classify_with_reason(tool_name, tool_input)
     if seed is None:
+        suffix = ""
+        if extra.get("cmd_head"):
+            suffix = f" cmd_head={extra['cmd_head']}"
+        _debug(
+            f"[post] event_name={hook_event_name or '<none>'} "
+            f"tool={tool_name or '<none>'} decision=reject reason={reject_reason}"
+            f"{suffix}"
+        )
         return 1
 
     sd = state_dir()
@@ -395,6 +450,14 @@ def main() -> int:
     turn = read_turn(sd)
 
     status, error_message = detect_status(data)
+
+    # Override: PostToolUseFailure always implies failure status, even if
+    # the 4-signal heuristics couldn't surface a specific error message.
+    if hook_event_name == "PostToolUseFailure":
+        if status != "failure":
+            status = "failure"
+            if not error_message:
+                error_message = sanitize.sanitize_error("PostToolUseFailure event")
 
     tool_result = data.get("tool_result", "")
     tool_response = data.get("tool_response") or {}
@@ -423,6 +486,12 @@ def main() -> int:
     if fallback_used and not args.get("query-summary"):
         args["query-summary"] = "start-fallback"
     emit(args)
+
+    _debug(
+        f"[post] event_name={hook_event_name or '<none>'} "
+        f"tool={tool_name or '<none>'} decision=upload "
+        f"event={seed.get('event_type', '')} status={status}"
+    )
     return 0
 
 

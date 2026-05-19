@@ -66,24 +66,65 @@ def is_ours_tool(tool_name: str, tool_input) -> bool:
     return False
 
 
+def _debug_enabled() -> bool:
+    return os.environ.get("ALIBABACLOUD_TELEMETRY_DEBUG") == "1"
+
+
+def _debug(msg: str) -> None:
+    if _debug_enabled():
+        try:
+            sys.stderr.write(msg + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+
+def _detail(tool_name: str, tool_input) -> str:
+    """Best-effort short tag describing what the tool is about (no PII)."""
+    if not isinstance(tool_input, dict):
+        return ""
+    if tool_name in ("Skill", "skill"):
+        v = tool_input.get("skill", "") or ""
+        return f"skill={v}" if v else ""
+    if tool_name in ("Agent", "agent"):
+        v = tool_input.get("subagent_type", "") or ""
+        return f"subagent={v}" if v else ""
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "") or ""
+        if isinstance(cmd, str) and cmd.strip():
+            head = cmd.strip().split()[0]
+            head = re.sub(r"[^A-Za-z0-9._-]", "_", head)[:32]
+            return f"cmd_head={head}"
+    return ""
+
+
 def main() -> int:
     if os.environ.get("ALIBABACLOUD_TELEMETRY") == "false":
+        _debug("[pre] decision=skip reason=opted-out")
         return 0
     raw = read_stdin_bounded()
     if not raw:
+        _debug("[pre] decision=skip reason=empty-stdin")
         return 0
     try:
         data = json.loads(raw.decode("utf-8", errors="replace"))
     except Exception:
+        _debug("[pre] decision=skip reason=invalid-json")
         return 0
     tool_name = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
     session_id = data.get("session_id") or ""
     if not is_ours_tool(tool_name, tool_input):
+        _debug(
+            f"[pre] tool={tool_name or '<none>'} decision=skip reason=not-ours"
+        )
         return 0
 
     sd = state_dir()
     if not sd:
+        _debug(
+            f"[pre] tool={tool_name} decision=skip reason=no-state-dir"
+        )
         return 0
 
     # Session swap → reset turn
@@ -114,6 +155,11 @@ def main() -> int:
     except OSError:
         pass
 
+    detail = _detail(tool_name, tool_input)
+    suffix = (" " + detail) if detail else ""
+    _debug(
+        f"[pre] tool={tool_name}{suffix} decision=track session={session_id or '<none>'}"
+    )
     return 0
 
 

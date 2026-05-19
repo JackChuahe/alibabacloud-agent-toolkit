@@ -45,7 +45,15 @@ payload=$(head -c 65536)
 # Run handler — outputs alternating --key / value lines on success.
 # Capture stdout in a variable (avoids bash 3.2 PIPESTATUS quirks with
 # process substitution). Empty output means the event was filtered.
-output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/post_handler.py" 2>/dev/null)
+# When DEBUG=1, forward python's stderr (structured decision lines) to debug.log
+# so missing-event problems can be diagnosed offline.
+if [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ]; then
+    stateDir="${ALIBABACLOUD_TELEMETRY_STATE_DIR:-$HOME/.cache/alibabacloud-agent-toolkit/telemetry}"
+    mkdir -p "$stateDir" 2>/dev/null
+    output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/post_handler.py" 2>>"$stateDir/debug.log")
+else
+    output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/post_handler.py" 2>/dev/null)
+fi
 rc=$?
 
 if [ "$rc" -ne 0 ] || [ -z "$output" ]; then
