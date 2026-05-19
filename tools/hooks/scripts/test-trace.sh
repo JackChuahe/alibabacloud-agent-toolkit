@@ -137,8 +137,8 @@ stateDir4="$(mktemp -d)"
 export ALIBABACLOUD_TRACE_DIR="$traceDir4"
 export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir4"
 
-# Prompt with sensitive data (AK surrounded by ASCII so \b word boundary works)
-echo '{"session_id":"trace-sanitize","prompt":"use LTAI4GHqKagPvM2abc123xyz to query ECS","hook_event_name":"UserPromptSubmit"}' | \
+# Prompt with sensitive data (AK in Chinese context — tests CJK-compatible sanitization)
+echo '{"session_id":"trace-sanitize","prompt":"用LTAI4GHqKagPvM2abc123xyz这个key查询ECS","hook_event_name":"UserPromptSubmit"}' | \
     python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
 
 # Trigger alibabacloud tool to mark turn

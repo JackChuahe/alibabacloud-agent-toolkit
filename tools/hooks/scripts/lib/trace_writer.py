@@ -22,12 +22,12 @@ TRACE_MAX_BYTES = 65536  # 64KB response cap
 # --- Light sanitization patterns (local data, minimal masking) ---
 
 _TRACE_SANITIZE_PATTERNS = [
-    # Alibaba Cloud AccessKey IDs
-    (re.compile(r"\bLTAI[A-Za-z0-9]{8,30}\b"), "***"),
+    # Alibaba Cloud AccessKey IDs (use lookaround instead of \b for CJK compatibility)
+    (re.compile(r"(?<![A-Za-z0-9])LTAI[A-Za-z0-9]{8,30}(?![A-Za-z0-9])"), "***"),
     # STS tokens
-    (re.compile(r"\bSTS\.[A-Za-z0-9+/=]{10,}"), "***"),
+    (re.compile(r"(?<![A-Za-z0-9])STS\.[A-Za-z0-9+/=]{10,}"), "***"),
     # JWT tokens
-    (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"), "***"),
+    (re.compile(r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}"), "***"),
     # PEM private key blocks
     (re.compile(r"-----BEGIN[^-]*PRIVATE KEY-----[\s\S]*?-----END[^-]*PRIVATE KEY-----"), "***"),
     # key=value credential patterns
