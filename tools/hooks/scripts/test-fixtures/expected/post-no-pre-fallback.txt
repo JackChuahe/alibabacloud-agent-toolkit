@@ -9,7 +9,7 @@ skill_invocation
 --tool-name
 Skill
 --session-id
-test-session-skill
+test-session-fallback
 --status
 success
 --turn

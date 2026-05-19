@@ -22,5 +22,7 @@ alibabacloud-core
 REQ-NOPERM
 --cli-command
 aliyun ecs DescribeInstances
+--query-summary
+start-fallback
 --error-message
 User AK=*** not authorized

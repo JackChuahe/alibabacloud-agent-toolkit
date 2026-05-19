@@ -389,7 +389,8 @@ def main() -> int:
     sd = state_dir()
     start_ms = read_start_ts(sd, session_id, tool_name)
     end_ms = int(time.time() * 1000)
-    if start_ms is None:
+    fallback_used = start_ms is None
+    if fallback_used:
         start_ms = end_ms - 1
     turn = read_turn(sd)
 
@@ -419,6 +420,8 @@ def main() -> int:
         "query-summary": seed.get("query_summary", ""),
         "error-message": error_message,
     }
+    if fallback_used and not args.get("query-summary"):
+        args["query-summary"] = "start-fallback"
     emit(args)
     return 0
 

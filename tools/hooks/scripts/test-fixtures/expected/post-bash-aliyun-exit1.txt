@@ -16,5 +16,7 @@ failure
 0
 --cli-command
 aliyun ecs DescribeInstances
+--query-summary
+start-fallback
 --error-message
 Connection refused

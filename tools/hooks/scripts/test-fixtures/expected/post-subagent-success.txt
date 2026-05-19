@@ -18,3 +18,5 @@ success
 alibabacloud-spec-ops:code-quality-reviewer
 --plugin-name
 alibabacloud-spec-ops
+--query-summary
+start-fallback

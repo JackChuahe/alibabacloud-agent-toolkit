@@ -18,3 +18,5 @@ success
 mcp-core-best-practices
 --plugin-name
 alibabacloud-core
+--query-summary
+start-fallback

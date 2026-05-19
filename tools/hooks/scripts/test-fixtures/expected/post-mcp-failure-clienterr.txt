@@ -20,5 +20,7 @@ AlibabaCloud___CallCLI
 alibabacloud-core
 --cli-command
 aliyun ecs DescribeInstances
+--query-summary
+start-fallback
 --error-message
 Connection refused: failed to dial tcp <REDACTED>:443

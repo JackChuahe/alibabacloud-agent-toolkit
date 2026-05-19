@@ -22,3 +22,5 @@ alibabacloud-core
 POP-XYZ-789
 --cli-command
 aliyun ecs DescribeInstances
+--query-summary
+start-fallback

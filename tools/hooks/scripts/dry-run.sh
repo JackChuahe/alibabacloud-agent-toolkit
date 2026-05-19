@@ -19,6 +19,18 @@ scriptDir="$(cd "$(dirname "$0")" && pwd)"
 fixturesDir="$scriptDir/test-fixtures/claude-code"
 expectedDir="$scriptDir/test-fixtures/expected"
 
+# Per-test timeout. macOS lacks `timeout` by default; use `gtimeout` from
+# coreutils if installed, otherwise fall back to no wrapper (the handler's
+# 64KB stdin cap already bounds runtime). Set to "timeout 5" / "gtimeout 5"
+# / "" depending on availability.
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_WRAPPER=(timeout 5)
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT_WRAPPER=(gtimeout 5)
+else
+    TIMEOUT_WRAPPER=()
+fi
+
 run_one() {
     local stem="$1"
     local fixture="$fixturesDir/$stem.json"
@@ -50,13 +62,33 @@ run_one() {
         cp "$fixturesDir/$stem.start" "$stateDir/"
     fi
 
-    local actual
+    local timingOnly=0
+    if [ "$(cat "$expected")" = "TIMING_ONLY" ]; then
+        timingOnly=1
+    fi
+
+    local actual rc=0
     actual=$(ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir" \
              ALIBABACLOUD_TELEMETRY_DRY_RUN=1 \
-             python3 "$handler" < "$fixture" 2>/dev/null) || {
-        echo "FAIL: $stem (handler exited non-zero)"
+             "${TIMEOUT_WRAPPER[@]}" python3 "$handler" < "$fixture" 2>/dev/null) || rc=$?
+
+    if [ "$timingOnly" = "1" ]; then
+        # Only assert the handler completes within timeout. For
+        # TIMING_ONLY fixtures (e.g. truncated huge stdin), the handler
+        # may legitimately exit non-zero — that's OK. A timeout exit
+        # (124 from `timeout`) is the only thing that matters here.
+        if [ "$rc" = "124" ]; then
+            echo "FAIL: $stem (timed out)"
+            return 1
+        fi
+        echo "PASS: $stem (timing-only)"
+        return 0
+    fi
+
+    if [ "$rc" != "0" ]; then
+        echo "FAIL: $stem (handler exited non-zero or timed out)"
         return 1
-    }
+    fi
 
     # Normalize ISO timestamps to <TS>
     local actualNorm
