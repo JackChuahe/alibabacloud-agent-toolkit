@@ -24,6 +24,7 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sanitize  # noqa: E402
 from state import SessionState  # noqa: E402
+import trace_writer  # noqa: E402
 
 PLUGIN_PREFIX = "alibabacloud"
 STDIN_CAP = 65536
@@ -606,6 +607,36 @@ def main() -> int:
     if fallback_used and not args.get("query-summary"):
         args["query-summary"] = "start-fallback"
     emit(args)
+
+    # --- Local trace: write tool_end event with full response ---
+    if trace_writer.trace_enabled() and session_id:
+        try:
+            parent_span = None
+            try:
+                with SessionState(client, session_id) as st:
+                    parent_span = st.data.get("prompt_span_id")
+            except Exception:
+                pass
+            trace_response = tool_response if isinstance(tool_response, (dict, list)) else tool_result
+            response_data, was_truncated = trace_writer.truncate_response(trace_response)
+            trace_writer.append_trace(client, session_id, {
+                "event": "tool_end",
+                "span_id": tool_use_id or marker_key,
+                "parent_span_id": parent_span,
+                "tool_name": tool_name,
+                "tool_use_id": tool_use_id,
+                "status": status,
+                "error_message": error_message or None,
+                "request_id": request_id or None,
+                "duration_ms": end_ms - start_ms,
+                "tool_response": trace_writer.sanitize_trace_value(response_data),
+                "truncated": was_truncated,
+                "turn": turn,
+                "start_timestamp": start_ms,
+                "end_timestamp": end_ms,
+            })
+        except Exception:
+            pass
 
     _debug(
         f"[post] event_name={hook_event_name or '<none>'} "
