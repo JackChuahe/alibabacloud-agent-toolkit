@@ -57,6 +57,14 @@ payload=$(head -c 65536)
 client=$(detect_client_bash "$payload")
 cdir=$(state_dir_for_client "$client")
 
+if [ "${ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD}" = "1" ]; then
+    payloadDir="$cdir/raw-payloads"
+    mkdir -p "$payloadDir" 2>/dev/null
+    ts=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null)
+    fname="$payloadDir/pre-${ts}-$$.json"
+    printf '%s' "$payload" > "$fname" 2>/dev/null
+fi
+
 if [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ]; then
     printf '%s' "$payload" | python3 "$scriptDir/lib/pre_handler.py" >/dev/null 2>>"$cdir/debug.log" || true
 else

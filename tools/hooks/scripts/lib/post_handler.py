@@ -410,7 +410,7 @@ def detect_status(data: dict) -> tuple[str, str]:
 
     # Signal 1: tool_response.is_error / status
     if isinstance(tool_response, dict):
-        if tool_response.get("is_error") is True:
+        if tool_response.get("is_error") is True or tool_response.get("isError") is True:
             msg = (
                 _result_message(plain_fallback=True)
                 or tool_response.get("error")
@@ -523,17 +523,26 @@ def main() -> int:
     tool_result = data.get("tool_result", "")
     tool_response = data.get("tool_response") or {}
 
-    # Try multiple sources in priority order. The first non-empty extraction wins.
-    # Successes typically have the cloud RequestId in tool_result; failures often
-    # put it in tool_response.error or top-level tool_error.
+    # Try multiple sources in priority order. The first non-empty extraction
+    # wins. Successes from MCP tools typically place the cloud RequestId in
+    # tool_response.content (the MCP-protocol envelope); successful Bash calls
+    # put it in tool_response.stdout; failures put the error JSON in
+    # tool_response.error or top-level tool_error.
     _rid_sources: list = [tool_result]
     if isinstance(tool_response, dict):
         _rid_sources.extend([
-            tool_response.get("stdout"),
+            tool_response.get("content"),   # MCP-protocol envelope (often a list)
+            tool_response.get("output"),    # alternative naming
+            tool_response.get("result"),    # alternative naming
+            tool_response.get("stdout"),    # Bash-style
             tool_response.get("error"),
             tool_response.get("stderr"),
         ])
     _rid_sources.extend([data.get("tool_error"), data.get("error")])
+    # Last resort: walk the whole tool_response dict for any RequestId/PopRequestId
+    # under arbitrary nesting (defensive against future schema changes).
+    if isinstance(tool_response, dict):
+        _rid_sources.append(tool_response)
 
     request_id = ""
     for _src in _rid_sources:

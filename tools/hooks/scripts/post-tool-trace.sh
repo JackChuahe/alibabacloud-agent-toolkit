@@ -81,6 +81,16 @@ payload=$(head -c 65536)
 client=$(detect_client_bash "$payload")
 cdir=$(state_dir_for_client "$client")
 
+# Optional raw-payload trace: dump full stdin to a file so future bugs
+# can be diagnosed without guessing at the payload shape.
+if [ "${ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD}" = "1" ]; then
+    payloadDir="$cdir/raw-payloads"
+    mkdir -p "$payloadDir" 2>/dev/null
+    ts=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null)
+    fname="$payloadDir/post-${ts}-$$.json"
+    printf '%s' "$payload" > "$fname" 2>/dev/null
+fi
+
 # Run handler — outputs alternating --key / value lines on success.
 # Capture stdout in a variable (avoids bash 3.2 PIPESTATUS quirks with
 # process substitution). Empty output means the event was filtered.

@@ -72,6 +72,7 @@ export ALIBABACLOUD_TELEMETRY=false
 | `ALIBABACLOUD_TELEMETRY_DEBUG`      | `0`                                                    | When `1`, capture every hook fire decision into `<state-dir>/<client>/debug.log`                                                |
 | `ALIBABACLOUD_TELEMETRY_DRY_RUN`    | `0`                                                    | When `1`, log the would-be `uvx` command without executing it (still writes to `debug.log`)                                     |
 | `ALIBABACLOUD_TELEMETRY_STATE_DIR`  | `~/.cache/alibabacloud-agent-toolkit/telemetry`        | Override state directory; auto-falls back to `/tmp/alibabacloud-agent-toolkit-telemetry-<uid>` if home cache is unwritable      |
+| `ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD` | `0`                                                 | When `1`, dump raw stdin payloads to `<state-dir>/<client>/raw-payloads/<event>-<ts>-<pid>.json` for each hook fire. Use only for diagnosing extraction bugs — files contain the full hook payload (sensitive content possible) and can grow large. |
 | `COPILOT_CLI`                       | unset                                                  | Set to `1` to declare the Copilot CLI client (Phase 2 stub)                                                                     |
 | `CODEX_CLI`                         | unset                                                  | Set to `1` to declare the Codex client (Phase 2 stub)                                                                           |
 | `QODER_WORK`                        | unset                                                  | Set to `1` to declare the QoderWork client (Phase 2 stub)                                                                       |
@@ -392,6 +393,21 @@ Recognised by `post_handler.py`:
    python3 tools/hooks/scripts/lib/state.py show \
        --client claude-code --session <session-id>
    ```
+
+### Inspecting the raw hook payload
+
+If a field that should be present in the upload is missing (e.g.,
+`--tool-request-id` for an MCP call that visibly returned a RequestId),
+enable the raw-payload trace and reproduce:
+
+```bash
+export ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD=1
+# reproduce the call in Claude Code, then:
+ls -la ~/.cache/alibabacloud-agent-toolkit/telemetry/claude-code/raw-payloads/
+```
+
+Each file is the exact JSON Claude Code passed to the hook on stdin.
+Disable by `unset ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD` — it is opt-in.
 
 ## Test harness
 
