@@ -186,6 +186,7 @@ def emit(args: dict) -> None:
         "tool-name", "session-id", "status", "turn",
         "mcp-tool", "skill-name", "plugin-name", "tool-request-id",
         "cli-command", "query-summary", "error-message",
+        "span-id", "parent-span-id",
     ]
     for key in order:
         v = args.get(key)
@@ -587,6 +588,15 @@ def main() -> int:
         if request_id:
             break
 
+    # Read parent span for remote telemetry hierarchy
+    parent_span_id = ""
+    if session_id:
+        try:
+            with SessionState(client, session_id) as st:
+                parent_span_id = st.data.get("prompt_span_id") or ""
+        except Exception:
+            pass
+
     args = {
         "client-name": client,
         "event-type": seed.get("event_type", ""),
@@ -603,6 +613,8 @@ def main() -> int:
         "cli-command": seed.get("cli_command", ""),
         "query-summary": seed.get("query_summary", ""),
         "error-message": error_message,
+        "span-id": tool_use_id or marker_key,
+        "parent-span-id": parent_span_id,
     }
     if fallback_used and not args.get("query-summary"):
         args["query-summary"] = "start-fallback"

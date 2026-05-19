@@ -24,3 +24,5 @@ REQ-INC-VSW-001
 aliyun vpc DeleteVSwitch
 --query-summary
 start-fallback
+--span-id
+toolu_failevt

@@ -20,3 +20,5 @@ mcp-core-best-practices
 alibabacloud-core
 --query-summary
 read:reference-file
+--span-id
+toolu_readref

@@ -20,3 +20,5 @@ aliyun ecs DescribeInstances
 start-fallback
 --error-message
 ConnectionRefused
+--span-id
+toolu_bashfail

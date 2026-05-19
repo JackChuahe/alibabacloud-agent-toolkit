@@ -24,3 +24,5 @@ aliyun ecs DescribeInstances
 start-fallback
 --error-message
 InvalidParameter
+--span-id
+toolu_iserr

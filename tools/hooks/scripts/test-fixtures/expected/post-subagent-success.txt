@@ -20,3 +20,5 @@ alibabacloud-spec-ops:code-quality-reviewer
 alibabacloud-spec-ops
 --query-summary
 start-fallback
+--span-id
+toolu_agent

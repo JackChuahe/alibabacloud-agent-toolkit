@@ -2,6 +2,8 @@
 # Stop hook — increments the per-session turn counter at end of agent turn.
 # Turn number is consumed by post-tool-trace.sh to tag --turn on each event.
 # Also bound to StopFailure for symmetry; both paths log identically.
+# When the turn involved alibabacloud tools, stop_handler.py emits a
+# user_prompt_turn_start event to stdout which we upload to remote telemetry.
 # Delegates to lib/stop_handler.py which uses fcntl-locked per-session state.
 set +e
 umask 077
@@ -47,6 +49,24 @@ state_dir_for_client() {
     printf '%s' "$cdir"
 }
 
+debug_log() {
+    [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ] || return 0
+    local cdir="$1"
+    local msg="$2"
+    [ -n "$cdir" ] || return 0
+    printf '[%s] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$msg" >> "$cdir/debug.log" 2>/dev/null
+}
+
+# Extract --<key> value from a flat key/value args array. Bash 3.2-safe.
+extract_arg() {
+    local target="$1"; shift
+    local prev=""
+    for a in "$@"; do
+        if [ "$prev" = "$target" ]; then echo "$a"; return 0; fi
+        prev="$a"
+    done
+}
+
 # Buffer stdin so we can sniff client and forward to python.
 payload=$(head -c 65536)
 
@@ -68,10 +88,53 @@ if [ "${ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD}" = "1" ]; then
     fi
 fi
 
+# Run handler — outputs alternating --key / value lines when the turn
+# involved alibabacloud tools. Empty output / non-zero exit = no upload needed.
 if [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ]; then
-    printf '%s' "$payload" | python3 "$scriptDir/lib/stop_handler.py" 2>>"$cdir/debug.log"
+    output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/stop_handler.py" 2>>"$cdir/debug.log")
 else
-    printf '%s' "$payload" | python3 "$scriptDir/lib/stop_handler.py" 2>/dev/null
+    output=$(printf '%s' "$payload" | python3 "$scriptDir/lib/stop_handler.py" 2>/dev/null)
 fi
+rc=$?
+
+if [ "$rc" -ne 0 ] || [ -z "$output" ]; then
+    debug_log "$cdir" "[stop] decision=no-upload"
+    exit 0
+fi
+
+# Split output into lines preserving each whole line as one arg.
+lines=()
+while IFS= read -r line; do
+    lines+=("$line")
+done <<< "$output"
+
+if [ "${#lines[@]}" -eq 0 ]; then
+    exit 0
+fi
+
+# Build argv array (preserves quoting, no eval)
+args=()
+for line in "${lines[@]}"; do
+    args+=("$line")
+done
+
+# Dry-run mode: log instead of upload
+if [ "${ALIBABACLOUD_TELEMETRY_DRY_RUN}" = "1" ]; then
+    {
+        printf 'DRYRUN: uvx alibabacloud.mcp-proxy@latest plugin-telemetry'
+        for a in "${args[@]}"; do
+            printf ' %q' "$a"
+        done
+        printf '\n'
+    } >> "$cdir/debug.log" 2>/dev/null
+    debug_log "$cdir" "[stop] decision=dryrun event=$(extract_arg --event-type "${args[@]}")"
+    exit 0
+fi
+
+# Fire-and-forget: detach so the agent loop never waits on uvx.
+debug_log "$cdir" "[stop] decision=upload event=$(extract_arg --event-type "${args[@]}")"
+( uvx alibabacloud.mcp-proxy@latest plugin-telemetry "${args[@]}" \
+    >/dev/null 2>&1 < /dev/null & ) >/dev/null 2>&1
+disown 2>/dev/null
 
 exit 0

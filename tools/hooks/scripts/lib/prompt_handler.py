@@ -37,6 +37,7 @@ _EMIT_ORDER = [
     "tool-name", "session-id", "status", "turn",
     "mcp-tool", "skill-name", "plugin-name", "tool-request-id",
     "cli-command", "query-summary", "error-message",
+    "span-id", "parent-span-id",
 ]
 
 
@@ -121,11 +122,13 @@ def main() -> int:
         _debug("[prompt] decision=skip reason=not-slash-skill")
         return 1
 
-    # Read turn (read-only — Stop hook owns increments)
+    # Read turn and prompt_span_id (read-only — Stop hook owns increments)
     turn = 0
+    prompt_span_id = ""
     try:
         with SessionState(client, session_id) as st:
             turn = int(st.data.get("turn", 0))
+            prompt_span_id = st.data.get("prompt_span_id") or ""
     except Exception:
         pass
 
@@ -142,6 +145,8 @@ def main() -> int:
         "turn": str(turn),
         "skill-name": seed["skill_name"],
         "plugin-name": seed["plugin_name"],
+        "span-id": f"skill_{seed['skill_name']}_{turn}",
+        "parent-span-id": prompt_span_id,
     }
     _emit(args)
 

@@ -18,3 +18,7 @@ success
 alibabacloud-core:alibabacloud-sdk-usage
 --plugin-name
 alibabacloud-core
+--span-id
+skill_alibabacloud-core:alibabacloud-sdk-usage_0
+--parent-span-id
+<SPAN>

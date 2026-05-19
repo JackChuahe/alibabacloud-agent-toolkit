@@ -24,3 +24,5 @@ A4A33CAD-F83A-533C-86E0-E8161667306D
 aliyun vpc DescribeVSwitches
 --query-summary
 start-fallback
+--span-id
+toolu_trcontent

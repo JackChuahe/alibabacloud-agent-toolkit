@@ -24,3 +24,5 @@ alibabacloud-core
 aliyun vpc DescribeVSwitches
 --query-summary
 start-fallback
+--span-id
+toolu_textprefix

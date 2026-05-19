@@ -218,4 +218,74 @@ rm -rf "$traceDir5"
 rm -f "$tmpFixture"
 
 echo ""
+echo "=== Test: Stop emits user_prompt_turn_start to stdout ==="
+
+export ALIBABACLOUD_TRACE="true"
+traceDir6="$(mktemp -d)"
+stateDir6="$(mktemp -d)"
+export ALIBABACLOUD_TRACE_DIR="$traceDir6"
+export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir6"
+
+# Simulate a full turn: prompt → pre (sets turn_has_trace) → stop
+echo '{"session_id":"trace-emit-test","prompt":"test prompt","hook_event_name":"UserPromptSubmit"}' | \
+    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+
+echo '{"session_id":"trace-emit-test","tool_name":"mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI","tool_use_id":"toolu_emit_001","tool_input":{"command":"aliyun ecs DescribeInstances"},"hook_event_name":"PreToolUse"}' | \
+    python3 "$scriptDir/lib/pre_handler.py" > /dev/null 2>&1 || true
+
+# Stop should emit user_prompt_turn_start to stdout
+stopOutput=$(echo '{"session_id":"trace-emit-test","hook_event_name":"Stop"}' | \
+    python3 "$scriptDir/lib/stop_handler.py" 2>/dev/null)
+stopRc=$?
+
+if [ "$stopRc" -ne 0 ]; then
+    echo "FAIL: stop_handler exited with code $stopRc (expected 0 for emit)"
+    exit 1
+fi
+if [ -z "$stopOutput" ]; then
+    echo "FAIL: stop_handler produced no stdout (expected user_prompt_turn_start)"
+    exit 1
+fi
+if ! echo "$stopOutput" | grep -q "user_prompt_turn_start"; then
+    echo "FAIL: stdout missing event-type user_prompt_turn_start"
+    echo "Got: $stopOutput"
+    exit 1
+fi
+if ! echo "$stopOutput" | grep -q "\-\-span-id"; then
+    echo "FAIL: stdout missing --span-id"
+    echo "Got: $stopOutput"
+    exit 1
+fi
+if ! echo "$stopOutput" | grep -q "\-\-start-timestamp"; then
+    echo "FAIL: stdout missing --start-timestamp"
+    echo "Got: $stopOutput"
+    exit 1
+fi
+echo "PASS: Stop emits user_prompt_turn_start to stdout"
+rm -rf "$traceDir6" "$stateDir6"
+
+echo ""
+echo "=== Test: Stop does NOT emit when no alibabacloud tools used ==="
+
+traceDir7="$(mktemp -d)"
+stateDir7="$(mktemp -d)"
+export ALIBABACLOUD_TRACE_DIR="$traceDir7"
+export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir7"
+
+# Only prompt + stop (no alibabacloud pre_handler call)
+echo '{"session_id":"trace-noemit-test","prompt":"hello world","hook_event_name":"UserPromptSubmit"}' | \
+    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+
+stopOutput2=$(echo '{"session_id":"trace-noemit-test","hook_event_name":"Stop"}' | \
+    python3 "$scriptDir/lib/stop_handler.py" 2>/dev/null) && stopRc2=0 || stopRc2=$?
+
+if [ "$stopRc2" -eq 0 ] && [ -n "$stopOutput2" ]; then
+    echo "FAIL: stop_handler emitted for non-alibabacloud turn"
+    echo "Got: $stopOutput2"
+    exit 1
+fi
+echo "PASS: Stop does NOT emit when no alibabacloud tools used"
+rm -rf "$traceDir7" "$stateDir7"
+
+echo ""
 echo "=== All trace tests passed ==="

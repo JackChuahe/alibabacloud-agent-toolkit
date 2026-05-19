@@ -24,3 +24,5 @@ DC946F93-C0F8-5C47-87E6-E3E5757A420D
 aliyun vpc DescribeVSwitches
 --query-summary
 start-fallback
+--span-id
+toolu_vrtx_01WTjPJYW3iBsyPK2St7Nu2k

@@ -24,3 +24,5 @@ POP-XYZ-789
 aliyun ecs DescribeInstances
 --query-summary
 start-fallback
+--span-id
+toolu_poprid

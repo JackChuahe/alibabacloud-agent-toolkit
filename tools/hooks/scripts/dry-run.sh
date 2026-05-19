@@ -116,9 +116,9 @@ subprocess.check_call([
         return 1
     fi
 
-    # Normalize ISO timestamps to <TS>
+    # Normalize ISO timestamps to <TS> and random hex span IDs to <SPAN>
     local actualNorm
-    actualNorm=$(echo "$actual" | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z/<TS>/g')
+    actualNorm=$(echo "$actual" | sed -E 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z/<TS>/g' | sed -E 's/^[0-9a-f]{16}$/<SPAN>/g')
 
     if diff -u <(cat "$expected") <(echo "$actualNorm") > /dev/null; then
         echo "PASS: $stem"
