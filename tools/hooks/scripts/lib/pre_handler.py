@@ -16,6 +16,7 @@ import time
 # Make sibling modules importable when run directly
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from state import SessionState  # noqa: E402
+import trace_writer  # noqa: E402
 
 PLUGIN_PREFIX = "alibabacloud"
 STDIN_CAP = 65536
@@ -132,12 +133,36 @@ def main() -> int:
 
     client = _detect_client(text)
     key = tool_use_id or _sanitize_tool_name(tool_name)
+    parent_span = None
+    turn = 0
     try:
         with SessionState(client, session_id) as st:
             st.data["tool_starts"][key] = int(time.time() * 1000)
+            # --- Local trace: mark turn active, get parent span ---
+            if trace_writer.trace_enabled():
+                st.data["turn_has_trace"] = True
+                parent_span = st.data.get("prompt_span_id")
+                turn = int(st.data.get("turn", 0))
     except Exception:
-        # Best-effort; never crash the agent.
         pass
+
+    # --- Local trace: write tool_start event ---
+    if trace_writer.trace_enabled() and session_id:
+        try:
+            now_ms = int(time.time() * 1000)
+            trace_writer.append_trace(client, session_id, {
+                "event": "tool_start",
+                "span_id": tool_use_id or key,
+                "parent_span_id": parent_span,
+                "tool_name": tool_name,
+                "tool_use_id": tool_use_id,
+                "tool_input": trace_writer.sanitize_trace_value(tool_input),
+                "turn": turn,
+                "start_timestamp": now_ms,
+                "end_timestamp": now_ms,
+            })
+        except Exception:
+            pass
 
     detail = _detail(tool_name, tool_input)
     suffix = (" " + detail) if detail else ""
