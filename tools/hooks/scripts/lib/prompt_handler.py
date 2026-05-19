@@ -19,6 +19,8 @@ from typing import Any, Optional
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import sanitize  # noqa: E402
 from state import SessionState  # noqa: E402
+import trace_writer  # noqa: E402
+import uuid  # noqa: E402
 
 STDIN_CAP = 65536
 DEBUG = os.environ.get("ALIBABACLOUD_TELEMETRY_DEBUG") == "1"
@@ -102,12 +104,22 @@ def main() -> int:
         _debug("[prompt] decision=skip reason=empty-session-id")
         return 1
 
+    client = _detect_client(text)
+
+    # --- Local trace: store prompt for potential backfill at Stop ---
+    if trace_writer.trace_enabled() and session_id and prompt:
+        try:
+            with SessionState(client, session_id) as st:
+                st.data["pending_prompt"] = prompt
+                st.data["pending_prompt_ts"] = int(time.time() * 1000)
+                st.data["prompt_span_id"] = uuid.uuid4().hex[:16]
+        except Exception:
+            pass
+
     seed = _classify_prompt(prompt)
     if seed is None:
         _debug("[prompt] decision=skip reason=not-slash-skill")
         return 1
-
-    client = _detect_client(text)
 
     # Read turn (read-only — Stop hook owns increments)
     turn = 0
