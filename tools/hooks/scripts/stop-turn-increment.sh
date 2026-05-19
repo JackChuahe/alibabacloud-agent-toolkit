@@ -4,6 +4,7 @@
 # Also bound to StopFailure for symmetry; both paths log identically.
 # Delegates to lib/stop_handler.py which uses fcntl-locked per-session state.
 set +e
+umask 077
 
 if [ "${ALIBABACLOUD_TELEMETRY}" = "false" ]; then
     exit 0
@@ -54,10 +55,17 @@ cdir=$(state_dir_for_client "$client")
 
 if [ "${ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD}" = "1" ]; then
     payloadDir="$cdir/raw-payloads"
-    mkdir -p "$payloadDir" 2>/dev/null
+    mkdir -p "$payloadDir" 2>/dev/null && chmod 700 "$payloadDir" 2>/dev/null
     ts=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null)
     fname="$payloadDir/stop-${ts}-$$.json"
-    printf '%s' "$payload" > "$fname" 2>/dev/null
+    printf '%s' "$payload" > "$fname" 2>/dev/null && chmod 600 "$fname" 2>/dev/null
+    # TTL cleanup: remove files older than 7 days; cap at 200 files
+    find "$payloadDir" -type f -name "*.json" -mtime +7 -delete 2>/dev/null || \
+        find "$payloadDir" -type f -name "*.json" -mtime +7 -exec rm -f {} + 2>/dev/null
+    fileCount=$(find "$payloadDir" -type f -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${fileCount:-0}" -gt 200 ]; then
+        ls -1t "$payloadDir"/*.json 2>/dev/null | tail -n +201 | xargs rm -f 2>/dev/null
+    fi
 fi
 
 if [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ]; then

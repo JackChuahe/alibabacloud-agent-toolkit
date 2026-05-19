@@ -349,15 +349,21 @@ def _scan_dict_for_error(d: dict) -> Optional[str]:
     if d.get("isError") is True:
         msg = d.get("error") or d.get("message") or "isError=true"
         if isinstance(msg, dict):
-            return msg.get("Message") or msg.get("message") or "isError=true"
+            code = msg.get("Code") or msg.get("code") or ""
+            detail = msg.get("Message") or msg.get("message") or "isError=true"
+            return f"{code}: {detail}" if code else str(detail)
         return str(msg)
-    if d.get("Code") or d.get("error") or d.get("Error"):
-        return (
+    code = d.get("Code") or d.get("code") or ""
+    if code or d.get("error") or d.get("Error"):
+        detail = (
             d.get("Message")
             or d.get("message")
             or (d.get("error") if isinstance(d.get("error"), str) else "")
-            or str(d.get("Code") or d.get("Error") or "")
+            or str(d.get("Error") or "")
         )
+        if code:
+            return f"{code}: {detail}" if detail else str(code)
+        return str(detail) if detail else "error"
     status = d.get("status")
     if isinstance(status, str) and status.lower() in ("errored", "error", "failed", "failure"):
         return d.get("Message") or d.get("message") or f"status: {status}"
@@ -365,7 +371,11 @@ def _scan_dict_for_error(d: dict) -> Optional[str]:
 
 
 def detect_status(data: dict) -> tuple[str, str]:
-    """Return ("success" | "failure", error_message_sanitized_or_empty)."""
+    """Return ("success" | "failure", error_class_or_empty).
+
+    The error string is an error CLASS/CODE only (e.g. "NoPermission",
+    "ConnectionRefused", "MCPError:-32603") — never free-text content.
+    """
     tool_response = data.get("tool_response") or {}
     tool_error = data.get("tool_error") or data.get("error") or ""
     tool_result = data.get("tool_result", "")
@@ -417,17 +427,17 @@ def detect_status(data: dict) -> tuple[str, str]:
                 or tool_response.get("stderr")
                 or "tool_response.is_error=true"
             )
-            return "failure", sanitize.sanitize_error(msg)
+            return "failure", sanitize.classify_error(msg)
         if str(tool_response.get("status", "")).lower() == "errored":
             msg = (
                 _result_message(plain_fallback=True)
                 or "tool_response.status=Errored"
             )
-            return "failure", sanitize.sanitize_error(msg)
+            return "failure", sanitize.classify_error(msg)
 
     # Signal 2: top-level tool_error / error
     if tool_error:
-        return "failure", sanitize.sanitize_error(tool_error)
+        return "failure", sanitize.classify_error(tool_error)
 
     # Signal 3: Bash exit_code != 0
     if isinstance(tool_response, dict):
@@ -435,7 +445,7 @@ def detect_status(data: dict) -> tuple[str, str]:
         if isinstance(ec, int) and ec != 0:
             stderr = tool_response.get("stderr") or ""
             stdout = tool_response.get("stdout") or ""
-            return "failure", sanitize.sanitize_error(stderr or stdout or f"exit_code={ec}")
+            return "failure", sanitize.classify_error(stderr or stdout or f"exit_code={ec}")
 
     # If tool_response is a list (MCP envelope) and we don't have a
     # tool_result yet, synthesize one from the envelope items so Signal 4
@@ -448,7 +458,7 @@ def detect_status(data: dict) -> tuple[str, str]:
                 if item.get("isError") is True or item.get("is_error") is True:
                     msg = item.get("text") or item.get("content") or "tool_response item is_error=true"
                     if isinstance(msg, str):
-                        return "failure", sanitize.sanitize_error(msg)
+                        return "failure", sanitize.classify_error(msg)
                 inner = item.get("text") or item.get("content")
                 if isinstance(inner, str):
                     parts.append(inner)
@@ -460,7 +470,7 @@ def detect_status(data: dict) -> tuple[str, str]:
     # Signal 4: parse tool_result (bounded)
     msg = _result_message()
     if msg:
-        return "failure", sanitize.sanitize_error(msg)
+        return "failure", sanitize.classify_error(msg)
 
     return "success", ""
 
@@ -538,7 +548,7 @@ def main() -> int:
         if status != "failure":
             status = "failure"
             if not error_message:
-                error_message = sanitize.sanitize_error("PostToolUseFailure event")
+                error_message = sanitize.classify_error("PostToolUseFailure event")
 
     tool_result = data.get("tool_result", "")
     tool_response = data.get("tool_response") or {}

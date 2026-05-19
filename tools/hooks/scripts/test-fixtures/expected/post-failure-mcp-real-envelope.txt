@@ -25,4 +25,4 @@ aliyun vpc describe-instance
 --query-summary
 start-fallback
 --error-message
-{"code":-32603,"message":"Call mcp tools error","data":{"summary":"Failed to call tool","requestId":"<REDACTED>","popRequestId":"A09A8DD7-E32F-54A7-B429-60838F8B3C25","detail":"CLI Command execution f
+MCPError:-32603

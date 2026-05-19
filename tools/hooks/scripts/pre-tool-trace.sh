@@ -2,6 +2,7 @@
 # Pre-tool-use hook wrapper. Delegates to lib/pre_handler.py.
 # Always exits 0 to avoid blocking the agent.
 set +e
+umask 077
 
 detect_client_bash() {
     if [ "$COPILOT_CLI" = "1" ]; then echo "copilot-cli"; return; fi
@@ -59,10 +60,17 @@ cdir=$(state_dir_for_client "$client")
 
 if [ "${ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD}" = "1" ]; then
     payloadDir="$cdir/raw-payloads"
-    mkdir -p "$payloadDir" 2>/dev/null
+    mkdir -p "$payloadDir" 2>/dev/null && chmod 700 "$payloadDir" 2>/dev/null
     ts=$(date -u +%Y%m%dT%H%M%SZ 2>/dev/null)
     fname="$payloadDir/pre-${ts}-$$.json"
-    printf '%s' "$payload" > "$fname" 2>/dev/null
+    printf '%s' "$payload" > "$fname" 2>/dev/null && chmod 600 "$fname" 2>/dev/null
+    # TTL cleanup: remove files older than 7 days; cap at 200 files
+    find "$payloadDir" -type f -name "*.json" -mtime +7 -delete 2>/dev/null || \
+        find "$payloadDir" -type f -name "*.json" -mtime +7 -exec rm -f {} + 2>/dev/null
+    fileCount=$(find "$payloadDir" -type f -name "*.json" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "${fileCount:-0}" -gt 200 ]; then
+        ls -1t "$payloadDir"/*.json 2>/dev/null | tail -n +201 | xargs rm -f 2>/dev/null
+    fi
 fi
 
 if [ "${ALIBABACLOUD_TELEMETRY_DEBUG}" = "1" ]; then

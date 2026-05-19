@@ -20,11 +20,20 @@ LOCK_TIMEOUT_S = 2.0
 SESSION_TTL_DAYS = 7
 
 
+def _chmod_dir(p: str) -> None:
+    """Best-effort chmod 0700 on a directory."""
+    try:
+        os.chmod(p, 0o700)
+    except OSError:
+        pass
+
+
 def state_root() -> str:
     """Resolve the base state dir, falling back to /tmp/<...>-<uid> on error."""
     p = os.environ.get("ALIBABACLOUD_TELEMETRY_STATE_DIR") or STATE_DIR_DEFAULT
     try:
-        os.makedirs(p, exist_ok=True)
+        os.makedirs(p, mode=0o700, exist_ok=True)
+        _chmod_dir(p)
         # Probe writability
         with open(os.path.join(p, ".probe"), "w") as f:
             f.write("")
@@ -37,7 +46,8 @@ def state_root() -> str:
             uid = "0"
         fallback = f"/tmp/alibabacloud-agent-toolkit-telemetry-{uid}"
         try:
-            os.makedirs(fallback, exist_ok=True)
+            os.makedirs(fallback, mode=0o700, exist_ok=True)
+            _chmod_dir(fallback)
             return fallback
         except OSError:
             return ""
@@ -50,8 +60,11 @@ def client_dir(client: str) -> str:
         return ""
     safe_client = re.sub(r"[^A-Za-z0-9_-]", "_", client or "unknown")[:64]
     p = os.path.join(base, safe_client)
+    sessions_dir = os.path.join(p, "sessions")
     try:
-        os.makedirs(os.path.join(p, "sessions"), exist_ok=True)
+        os.makedirs(sessions_dir, mode=0o700, exist_ok=True)
+        _chmod_dir(p)
+        _chmod_dir(sessions_dir)
         return p
     except OSError:
         return ""
@@ -151,7 +164,8 @@ class SessionState:
         try:
             self.data["updated_ts"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             tmp = self.state_path + ".tmp"
-            with open(tmp, "w") as f:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
                 json.dump(self.data, f)
             os.replace(tmp, self.state_path)
         except OSError:

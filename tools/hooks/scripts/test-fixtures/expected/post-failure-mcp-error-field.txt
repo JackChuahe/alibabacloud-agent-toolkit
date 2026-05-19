@@ -24,5 +24,3 @@ A09A8DD7-E32F-54A7-B429-60838F8B3C25
 aliyun vpc DeleteVSwitch
 --query-summary
 start-fallback
---error-message
-{"data":{"requestId":"<REDACTED>","popRequestId":"A09A8DD7-E32F-54A7-B429-60838F8B3C25","summary":"failed"}}

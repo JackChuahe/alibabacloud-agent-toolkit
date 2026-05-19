@@ -24,5 +24,3 @@ REQ-INC-VSW-001
 aliyun vpc DeleteVSwitch
 --query-summary
 start-fallback
---error-message
-Specified vSwitch instance is not found
