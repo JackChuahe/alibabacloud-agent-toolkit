@@ -118,12 +118,13 @@ def main() -> int:
         pass
 
     now = _iso_now()
+    tool_name = f"skill_{seed['skill_name']}"
     args = {
         "client-name": client,
         "event-type": "skill_invocation",
         "start-timestamp": now,
         "end-timestamp": now,
-        "tool-name": "UserPromptSubmit",
+        "tool-name": tool_name,
         "session-id": session_id,
         "status": "success",
         "turn": str(turn),
@@ -133,7 +134,7 @@ def main() -> int:
     _emit(args)
 
     _debug(
-        f"[prompt] tool=UserPromptSubmit decision=upload "
+        f"[prompt] tool={tool_name} decision=upload "
         f"event=skill_invocation skill={seed['skill_name']} "
         f"plugin={seed['plugin_name']} session={session_id} client={client}"
     )

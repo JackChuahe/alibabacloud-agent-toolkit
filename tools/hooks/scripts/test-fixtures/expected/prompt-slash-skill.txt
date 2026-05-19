@@ -7,7 +7,7 @@ skill_invocation
 --end-timestamp
 <TS>
 --tool-name
-UserPromptSubmit
+skill_alibabacloud-core:alibabacloud-sdk-usage
 --session-id
 real-session-prompt
 --status
