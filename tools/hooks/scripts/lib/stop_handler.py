@@ -78,11 +78,12 @@ def main() -> int:
                             "start_timestamp": prompt_ts,
                             "end_timestamp": stop_ts,
                         })
-                    # Write turn_end (root span close)
+                    # Write turn_end (child of prompt span)
+                    import uuid as _uuid
                     trace_writer.append_trace(client, session_id, {
                         "event": "turn_end",
-                        "span_id": prompt_span,
-                        "parent_span_id": None,
+                        "span_id": _uuid.uuid4().hex[:16],
+                        "parent_span_id": prompt_span,
                         "stop_reason": hook_event_name,
                         "turn": current_turn,
                         "start_timestamp": stop_ts,
