@@ -231,12 +231,39 @@ multi-client operation:
 <state-dir>/
 ├── claude-code/                       # one bucket per client
 │   ├── debug.log                      # client-scoped diagnostic log
-│   └── sessions/
-│       ├── <safe-session>.state.json  # per-session state (turn + tool_starts)
-│       └── <safe-session>.lock        # fcntl exclusive lock file
+│   ├── sessions/
+│   │   ├── <safe-session>.state.json  # per-session state (turn + tool_starts + trace flags)
+│   │   └── <safe-session>.lock        # fcntl exclusive lock file
+│   ├── traces/                        # local audit JSONL (ALIBABACLOUD_TRACE)
+│   │   └── <safe-session>.jsonl       # per-session full-trace audit log
+│   └── raw-payloads/                  # diagnostic only (ALIBABACLOUD_TELEMETRY_TRACE_PAYLOAD)
+│       ├── pre-<ts>-<pid>.json        # raw hook stdin captures, 0600
+│       ├── post-<ts>-<pid>.json
+│       └── stop-<ts>-<pid>.json
 ├── codex/                             # (Phase 2 stub)
 └── qoderwork/                         # (Phase 2 stub)
 ```
+
+### Local audit trace (`traces/`)
+
+Default ON; set `ALIBABACLOUD_TRACE=false` to disable. Each session gets a
+single `<safe-session>.jsonl` file containing one JSON record per line.
+Files are local-only — never uploaded, never auto-cleaned. Override the
+location with `ALIBABACLOUD_TRACE_DIR=<path>`.
+
+| Event             | When written                                          | Key fields                                                      |
+| ----------------- | ----------------------------------------------------- | --------------------------------------------------------------- |
+| `skill_invocation`| Slash-skill prompt detected (`/alibabacloud-...:skill`) | `tool_name=Skill`, `skill_name`, `plugin_name`                |
+| `tool_start`      | PreToolUse for an alibabacloud-related tool            | `tool_name`, `tool_use_id`, `tool_input`                       |
+| `tool_end`        | PostToolUse / PostToolUseFailure                       | `status`, `error_message`, `request_id`, `duration_ms`, `tool_response`, `truncated` |
+| `prompt`          | Backfilled at Stop when the turn had alibabacloud activity | sanitized `prompt` text, full `start_timestamp` … `end_timestamp` span |
+| `turn_end`        | Always at Stop when the turn had alibabacloud activity | `stop_reason` (`Stop` / `StopFailure`)                          |
+
+All events share `span_id`, `parent_span_id`, `turn`, `session_id`, and
+`client`. The `prompt` event is the root span of each turn (`parent_span_id: null`); every other event in the same turn references it as parent.
+Responses larger than 64 KB are truncated and tagged `"truncated": true`.
+Light sanitization is applied (AK/SK, STS tokens, JWT, PEM keys,
+`accessKeySecret=…`, CN mobile, email).
 
 ### Path resolution
 
