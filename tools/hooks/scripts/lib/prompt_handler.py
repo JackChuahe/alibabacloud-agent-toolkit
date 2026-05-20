@@ -122,13 +122,14 @@ def main() -> int:
         _debug("[prompt] decision=skip reason=not-slash-skill")
         return 1
 
-    # Read turn and prompt_span_id (read-only — Stop hook owns increments)
+    # Read turn and prompt_span_id; mark turn as having alibabacloud activity
     turn = 0
     prompt_span_id = ""
     try:
         with SessionState(client, session_id) as st:
             turn = int(st.data.get("turn", 0))
             prompt_span_id = st.data.get("prompt_span_id") or ""
+            st.data["turn_has_trace"] = True
     except Exception:
         pass
 
