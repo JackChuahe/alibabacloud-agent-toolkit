@@ -288,4 +288,69 @@ echo "PASS: Stop does NOT emit when no alibabacloud tools used"
 rm -rf "$traceDir7" "$stateDir7"
 
 echo ""
+echo "=== Test: Slash-skill prompt records skill_invocation event ==="
+
+export ALIBABACLOUD_TRACE="true"
+traceDir8="$(mktemp -d)"
+stateDir8="$(mktemp -d)"
+export ALIBABACLOUD_TRACE_DIR="$traceDir8"
+export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir8"
+
+# Simulate: /alibabacloud-core:alibabacloud-sdk-usage prompt → pre (MCP tool) → stop
+echo '{"session_id":"trace-skill-inv","prompt":"/alibabacloud-core:alibabacloud-sdk-usage give me an ECS example","hook_event_name":"UserPromptSubmit"}' | \
+    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+
+echo '{"session_id":"trace-skill-inv","tool_name":"mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI","tool_use_id":"toolu_sk_001","tool_input":{"command":"aliyun ecs DescribeInstances"},"hook_event_name":"PreToolUse"}' | \
+    python3 "$scriptDir/lib/pre_handler.py" > /dev/null 2>&1 || true
+
+echo '{"session_id":"trace-skill-inv","hook_event_name":"Stop"}' | \
+    python3 "$scriptDir/lib/stop_handler.py" > /dev/null 2>&1 || true
+
+traceFile8="$traceDir8/trace-skill-inv.jsonl"
+if [ ! -f "$traceFile8" ]; then
+    echo "FAIL: trace file not created"
+    exit 1
+fi
+
+# Verify skill_invocation event exists
+if ! grep -q '"event": "skill_invocation"' "$traceFile8" && ! grep -q '"event":"skill_invocation"' "$traceFile8"; then
+    echo "FAIL: missing skill_invocation event in trace"
+    cat "$traceFile8"
+    exit 1
+fi
+
+# Verify skill_invocation has tool_name "Skill"
+if ! grep '"skill_invocation"' "$traceFile8" | grep -q '"tool_name": "Skill"\|"tool_name":"Skill"'; then
+    echo "FAIL: skill_invocation event missing tool_name=Skill"
+    cat "$traceFile8"
+    exit 1
+fi
+
+# Verify skill_invocation has correct parent_span_id (same as prompt's span_id)
+promptSpan8=$(python3 -c "
+import json
+for line in open('$traceFile8'):
+    r = json.loads(line)
+    if r['event'] == 'prompt':
+        print(r['span_id'])
+        break
+")
+skillParent8=$(python3 -c "
+import json
+for line in open('$traceFile8'):
+    r = json.loads(line)
+    if r['event'] == 'skill_invocation':
+        print(r.get('parent_span_id', ''))
+        break
+")
+if [ "$promptSpan8" != "$skillParent8" ]; then
+    echo "FAIL: skill_invocation parent_span_id=$skillParent8 != prompt span_id=$promptSpan8"
+    cat "$traceFile8"
+    exit 1
+fi
+
+echo "PASS: Slash-skill prompt records skill_invocation event"
+rm -rf "$traceDir8" "$stateDir8"
+
+echo ""
 echo "=== All trace tests passed ==="

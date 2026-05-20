@@ -133,7 +133,9 @@ def main() -> int:
         pass
 
     now = _iso_now()
+    now_ms = int(time.time() * 1000)
     tool_name = f"skill_{seed['skill_name']}"
+    span_id = f"skill_{seed['skill_name']}_{turn}"
     args = {
         "client-name": client,
         "event-type": "skill_invocation",
@@ -145,10 +147,25 @@ def main() -> int:
         "turn": str(turn),
         "skill-name": seed["skill_name"],
         "plugin-name": seed["plugin_name"],
-        "span-id": f"skill_{seed['skill_name']}_{turn}",
+        "span-id": span_id,
         "parent-span-id": prompt_span_id,
     }
     _emit(args)
+
+    # --- Local trace: write skill_invocation event ---
+    if trace_writer.trace_enabled():
+        trace_writer.append_trace(client, session_id, {
+            "event": "skill_invocation",
+            "span_id": span_id,
+            "parent_span_id": prompt_span_id,
+            "tool_name": "Skill",
+            "skill_name": seed["skill_name"],
+            "plugin_name": seed["plugin_name"],
+            "status": "success",
+            "turn": turn,
+            "start_timestamp": now_ms,
+            "end_timestamp": now_ms,
+        })
 
     _debug(
         f"[prompt] tool={tool_name} decision=upload "
