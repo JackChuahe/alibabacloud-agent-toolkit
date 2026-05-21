@@ -1,5 +1,22 @@
 # Telemetry Hooks
 
+> ## ⚠️ Canonical Source of Truth
+>
+> **This directory (`plugins/alibabacloud-core/hooks/`) is the single source
+> of truth for the hooks implementation across the entire toolkit.** Future
+> plugins (e.g. `alibabacloud-agent`, `alibabacloud-data-analytics`) MUST
+> copy from here verbatim. Do not edit hook code in other plugins. If you
+> need to change behavior, edit it here and re-sync to consumers.
+>
+> Validate the layout with: `bash tools/dev-hooks/verify-hooks.sh`
+>
+> Background: previously this code lived under `tools/hooks/` and each
+> plugin held a git symlink to it. The Claude Code plugin marketplace did
+> not preserve cross-directory symlinks during install, so end users got an
+> empty `hooks/` directory and hooks never fired. The fix is to ship hooks
+> as a real directory inside each plugin, with `alibabacloud-core` as the
+> authoritative copy that all other plugins mirror.
+
 Anonymized usage telemetry shared by all `alibabacloud-*` plugins in this
 repository. Captures per-call hook events from agent clients (Claude Code in
 Phase 1; Codex / QoderWork / VS Code as Phase 2 stubs) and uploads them via

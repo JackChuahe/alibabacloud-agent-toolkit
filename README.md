@@ -31,6 +31,16 @@ The `alibabacloud-core` plugin includes an SDK usage skill that generates Alibab
 └── tools/
 ```
 
+### Hook Implementation Convention
+
+`alibabacloud-core` is the **canonical source of truth** for the hook
+implementation. Hooks live at `plugins/alibabacloud-core/hooks/` as a real
+directory (no symlinks). When a new plugin (e.g. `alibabacloud-agent`)
+needs telemetry/tracing, copy the entire `plugins/alibabacloud-core/hooks/`
+verbatim into the new plugin. **Do not maintain parallel implementations.**
+CI (`tools/dev-hooks/verify-hooks.sh`) fails on any divergence or on the
+re-introduction of a `hooks/` symlink.
+
 ## Plugins
 
 | Plugin | Status | Description |
@@ -173,7 +183,7 @@ Opens `http://localhost:18321` in your browser automatically.
 export ALIBABACLOUD_TRACE=false
 ```
 
-See [`tools/hooks/README.md`](tools/hooks/README.md) for full field reference and file structure.
+See [`plugins/alibabacloud-core/hooks/README.md`](plugins/alibabacloud-core/hooks/README.md) for full field reference and file structure.
 
 ## Skills
 

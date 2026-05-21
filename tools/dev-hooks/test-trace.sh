@@ -6,6 +6,8 @@
 set -e
 
 scriptDir="$(cd "$(dirname "$0")" && pwd)"
+# Resolve the canonical hooks scripts dir (single source of truth).
+HOOKS_DIR="$(cd "$scriptDir/../../plugins/alibabacloud-core/hooks/scripts" && pwd)"
 fixturesDir="$scriptDir/test-fixtures/trace"
 
 # Isolated state + trace dir
@@ -21,23 +23,23 @@ export ALIBABACLOUD_TRACE="true"
 echo "=== Test: Full trace flow ==="
 
 # 1. Prompt (stores prompt in state, no trace yet)
-python3 "$scriptDir/lib/prompt_handler.py" < "$fixturesDir/prompt-basic.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/prompt_handler.py" < "$fixturesDir/prompt-basic.json" > /dev/null 2>&1 || true
 
 # 2. Pre (writes tool_start, marks turn_has_trace)
-python3 "$scriptDir/lib/pre_handler.py" < "$fixturesDir/pre-mcp-call.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/pre_handler.py" < "$fixturesDir/pre-mcp-call.json" > /dev/null 2>&1 || true
 
 # 3. Post (writes tool_end with response)
 # Need to seed start marker first
-python3 "$scriptDir/lib/state.py" seed-marker \
+python3 "$HOOKS_DIR/lib/state.py" seed-marker \
     --client claude-code \
     --session trace-test-session \
     --key toolu_test_001 \
     --ms 1716100000000
 
-python3 "$scriptDir/lib/post_handler.py" < "$fixturesDir/post-mcp-success.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/post_handler.py" < "$fixturesDir/post-mcp-success.json" > /dev/null 2>&1 || true
 
 # 4. Stop (backfills prompt, writes turn_end)
-python3 "$scriptDir/lib/stop_handler.py" < "$fixturesDir/stop-basic.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/stop_handler.py" < "$fixturesDir/stop-basic.json" > /dev/null 2>&1 || true
 
 # Verify trace file exists
 traceFile="$traceDir/trace-test-session.jsonl"
@@ -97,9 +99,9 @@ export ALIBABACLOUD_TRACE="false"
 traceDir2="$(mktemp -d)"
 export ALIBABACLOUD_TRACE_DIR="$traceDir2"
 
-python3 "$scriptDir/lib/prompt_handler.py" < "$fixturesDir/prompt-basic.json" > /dev/null 2>&1 || true
-python3 "$scriptDir/lib/pre_handler.py" < "$fixturesDir/pre-mcp-call.json" > /dev/null 2>&1 || true
-python3 "$scriptDir/lib/stop_handler.py" < "$fixturesDir/stop-basic.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/prompt_handler.py" < "$fixturesDir/prompt-basic.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/pre_handler.py" < "$fixturesDir/pre-mcp-call.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/stop_handler.py" < "$fixturesDir/stop-basic.json" > /dev/null 2>&1 || true
 
 if [ -f "$traceDir2/trace-test-session.jsonl" ]; then
     echo "FAIL: trace file created when ALIBABACLOUD_TRACE=false"
@@ -118,8 +120,8 @@ export ALIBABACLOUD_TRACE_DIR="$traceDir3"
 export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir3"
 
 # Only prompt + stop (no alibabacloud tool call in between)
-python3 "$scriptDir/lib/prompt_handler.py" < "$fixturesDir/prompt-basic.json" > /dev/null 2>&1 || true
-python3 "$scriptDir/lib/stop_handler.py" < "$fixturesDir/stop-basic.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/prompt_handler.py" < "$fixturesDir/prompt-basic.json" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/stop_handler.py" < "$fixturesDir/stop-basic.json" > /dev/null 2>&1 || true
 
 if [ -f "$traceDir3/trace-test-session.jsonl" ]; then
     echo "FAIL: trace file created for non-alibabacloud turn"
@@ -139,15 +141,15 @@ export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir4"
 
 # Prompt with sensitive data (AK in Chinese context — tests CJK-compatible sanitization)
 echo '{"session_id":"trace-sanitize","prompt":"用LTAItestFAKEnotREAL1234这个key查询ECS","hook_event_name":"UserPromptSubmit"}' | \
-    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/prompt_handler.py" > /dev/null 2>&1 || true
 
 # Trigger alibabacloud tool to mark turn
 echo '{"session_id":"trace-sanitize","tool_name":"mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI","tool_use_id":"toolu_san_001","tool_input":{"command":"aliyun ecs DescribeInstances"},"hook_event_name":"PreToolUse"}' | \
-    python3 "$scriptDir/lib/pre_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/pre_handler.py" > /dev/null 2>&1 || true
 
 # Stop to trigger backfill
 echo '{"session_id":"trace-sanitize","hook_event_name":"Stop"}' | \
-    python3 "$scriptDir/lib/stop_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/stop_handler.py" > /dev/null 2>&1 || true
 
 traceFile4="$traceDir4/trace-sanitize.jsonl"
 if grep -q "LTAItestFAKEnotREAL1234" "$traceFile4" 2>/dev/null; then
@@ -187,16 +189,16 @@ FIXTURE
 
 # Prompt + pre + post + stop
 echo '{"session_id":"trace-truncate","prompt":"big response test","hook_event_name":"UserPromptSubmit"}' | \
-    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/prompt_handler.py" > /dev/null 2>&1 || true
 echo '{"session_id":"trace-truncate","tool_name":"mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI","tool_use_id":"toolu_big_001","tool_input":{"command":"aliyun ecs DescribeInstances"},"hook_event_name":"PreToolUse"}' | \
-    python3 "$scriptDir/lib/pre_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/pre_handler.py" > /dev/null 2>&1 || true
 
 # Seed start marker
-python3 "$scriptDir/lib/state.py" seed-marker --client claude-code --session trace-truncate --key toolu_big_001 --ms 1716100000000
+python3 "$HOOKS_DIR/lib/state.py" seed-marker --client claude-code --session trace-truncate --key toolu_big_001 --ms 1716100000000
 
-python3 "$scriptDir/lib/post_handler.py" < "$tmpFixture" > /dev/null 2>&1 || true
+python3 "$HOOKS_DIR/lib/post_handler.py" < "$tmpFixture" > /dev/null 2>&1 || true
 echo '{"session_id":"trace-truncate","hook_event_name":"Stop"}' | \
-    python3 "$scriptDir/lib/stop_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/stop_handler.py" > /dev/null 2>&1 || true
 
 traceFile5="$traceDir5/trace-truncate.jsonl"
 if ! grep -q '"truncated": true' "$traceFile5" 2>/dev/null && ! grep -q '"truncated":true' "$traceFile5" 2>/dev/null; then
@@ -228,14 +230,14 @@ export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir6"
 
 # Simulate a full turn: prompt → pre (sets turn_has_trace) → stop
 echo '{"session_id":"trace-emit-test","prompt":"test prompt","hook_event_name":"UserPromptSubmit"}' | \
-    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/prompt_handler.py" > /dev/null 2>&1 || true
 
 echo '{"session_id":"trace-emit-test","tool_name":"mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI","tool_use_id":"toolu_emit_001","tool_input":{"command":"aliyun ecs DescribeInstances"},"hook_event_name":"PreToolUse"}' | \
-    python3 "$scriptDir/lib/pre_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/pre_handler.py" > /dev/null 2>&1 || true
 
 # Stop should emit user_prompt_turn_start to stdout
 stopOutput=$(echo '{"session_id":"trace-emit-test","hook_event_name":"Stop"}' | \
-    python3 "$scriptDir/lib/stop_handler.py" 2>/dev/null)
+    python3 "$HOOKS_DIR/lib/stop_handler.py" 2>/dev/null)
 stopRc=$?
 
 if [ "$stopRc" -ne 0 ]; then
@@ -274,10 +276,10 @@ export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir7"
 
 # Only prompt + stop (no alibabacloud pre_handler call)
 echo '{"session_id":"trace-noemit-test","prompt":"hello world","hook_event_name":"UserPromptSubmit"}' | \
-    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/prompt_handler.py" > /dev/null 2>&1 || true
 
 stopOutput2=$(echo '{"session_id":"trace-noemit-test","hook_event_name":"Stop"}' | \
-    python3 "$scriptDir/lib/stop_handler.py" 2>/dev/null) && stopRc2=0 || stopRc2=$?
+    python3 "$HOOKS_DIR/lib/stop_handler.py" 2>/dev/null) && stopRc2=0 || stopRc2=$?
 
 if [ "$stopRc2" -eq 0 ] && [ -n "$stopOutput2" ]; then
     echo "FAIL: stop_handler emitted for non-alibabacloud turn"
@@ -298,13 +300,13 @@ export ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir8"
 
 # Simulate: /alibabacloud-core:alibabacloud-sdk-usage prompt → pre (MCP tool) → stop
 echo '{"session_id":"trace-skill-inv","prompt":"/alibabacloud-core:alibabacloud-sdk-usage give me an ECS example","hook_event_name":"UserPromptSubmit"}' | \
-    python3 "$scriptDir/lib/prompt_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/prompt_handler.py" > /dev/null 2>&1 || true
 
 echo '{"session_id":"trace-skill-inv","tool_name":"mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI","tool_use_id":"toolu_sk_001","tool_input":{"command":"aliyun ecs DescribeInstances"},"hook_event_name":"PreToolUse"}' | \
-    python3 "$scriptDir/lib/pre_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/pre_handler.py" > /dev/null 2>&1 || true
 
 echo '{"session_id":"trace-skill-inv","hook_event_name":"Stop"}' | \
-    python3 "$scriptDir/lib/stop_handler.py" > /dev/null 2>&1 || true
+    python3 "$HOOKS_DIR/lib/stop_handler.py" > /dev/null 2>&1 || true
 
 traceFile8="$traceDir8/trace-skill-inv.jsonl"
 if [ ! -f "$traceFile8" ]; then
