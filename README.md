@@ -142,6 +142,8 @@ Local traces are never uploaded. Light sanitization (AK/SK, tokens, phone, email
 
 `telemetry-view` starts a local web server for browsing and analyzing trace data. Supports multi-client session browsing (Claude Code, VS Code, Copilot CLI, Codex, Qoderwork), span hierarchy tree, Gantt timeline, Graph flow chart, and live updates.
 
+![Telemetry View](tracing-view.png)
+
 **Start:**
 
 ```bash
@@ -162,6 +164,8 @@ Opens `http://localhost:18321` in your browser automatically.
 1. `$ALIBABACLOUD_TELEMETRY_STATE_DIR` (if set)
 2. `~/.cache/alibabacloud-agent-toolkit/telemetry/`
 3. `/tmp/alibabacloud-agent-toolkit-telemetry-<uid>/`
+
+**Roadmap:** Future releases will support automatic upload to user's [SLS (Simple Log Service)](https://www.alibabacloud.com/product/log-service) for long-term archival, centralized audit, and alarm configuration.
 
 **Disable local trace:**
 
