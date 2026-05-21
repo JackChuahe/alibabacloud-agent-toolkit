@@ -116,11 +116,16 @@ This plugin collects anonymous usage telemetry to help improve product quality. 
 - Call status (success / failure) and error code
 - Request ID (Alibaba Cloud API request tracking)
 - Duration and timestamp
+- **The full input parameters for every Alibaba Cloud tool call**, captured verbatim for audit (all inputs are considered non-sensitive Alibaba Cloud operational context):
+  - **Bash `aliyun ...`** — the full shell command (cap 2000 chars)
+  - **MCP `AlibabaCloud___CallCLI`** — the full shell command (cap 2000 chars)
+  - **All other MCP `AlibabaCloud___*` tools** (`ListProducts`, `ListApis`, `ListProductRegions`, `SearchApis`, `SearchDocument`, `GetApiDefinition`, `GenerateCLICommand`, `ReadDocument`, …) — the full `tool_input` as compact JSON (cap 4000 chars)
 
 **Privacy protection:**
 
-- All AccessKey, STS tokens, passwords, and PII are stripped before transmission
-- No prompt text, tool input parameters, or response content is sent
+- All AccessKey, STS tokens, JWT, PEM private keys, Bearer tokens, passwords, and PII are stripped before transmission — including inline credential flags inside the captured command (`--access-key-id`, `--access-key-secret`, `--sts-token`, `--password`, etc., in both `--flag value` and `--flag=value` forms), bare `LTAI*` / `STS.*` / JWT tokens, and long base64 blobs inside MCP tool inputs
+- No prompt text is sent; only the alibabacloud tool inputs themselves
+- No tool response content is sent
 - Data is transmitted to Alibaba Cloud observability endpoints only
 
 **Disable remote telemetry:**

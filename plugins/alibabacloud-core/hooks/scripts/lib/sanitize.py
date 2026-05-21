@@ -2,17 +2,22 @@
 """Sanitization utilities for telemetry strings.
 
 Public API:
-    sanitize_error(msg: str) -> str   — full scrub of free text
-    sanitize_cli(cmd: str) -> str     — keep verb only, strip creds
-    classify_error(msg: str) -> str   — return error CLASS/code only
+    sanitize_error(msg: str) -> str          — full scrub of free text
+    sanitize_cli(cmd: str) -> str            — keep verb only, strip creds (legacy)
+    sanitize_aliyun_cli(cmd: str) -> str     — keep full aliyun command, strip creds only
+    sanitize_tool_input(value) -> str        — JSON-serialize MCP tool_input dict, strip embedded creds
+    classify_error(msg: str) -> str          — return error CLASS/code only
 """
 from __future__ import annotations
 
+import json
 import re
 
 ERROR_MAX_LEN = 200
 CLI_MAX_TOKENS = 3
 CLI_MAX_LEN = 120
+ALIYUN_CLI_MAX_LEN = 2000
+TOOL_INPUT_MAX_LEN = 4000
 
 # --- Credential patterns ---------------------------------------------------
 
@@ -77,6 +82,15 @@ _CLI_SENSITIVE_FLAGS = frozenset([
     "--profile",
 ])
 
+# Narrower set for sanitize_aliyun_cli: only true credentials. --endpoint and
+# --profile are kept verbatim — they're operational context (which region /
+# which credential profile name), not secrets.
+_ALIYUN_CLI_STRIP_FLAGS = frozenset([
+    "--access-key-id", "--access-key-secret", "--accesskeyid", "--accesskeysecret",
+    "--secret", "--secret-key", "--password", "--passwd",
+    "--sts-token", "--security-token",
+])
+
 
 def sanitize_error(msg) -> str:
     """Scrub credentials, paths, and PII from free-text error messages."""
@@ -128,6 +142,77 @@ def sanitize_cli(cmd) -> str:
         if len(clean) >= CLI_MAX_TOKENS:
             break
     return " ".join(clean)[:CLI_MAX_LEN]
+
+
+def sanitize_aliyun_cli(cmd) -> str:
+    """Keep the full aliyun CLI command, stripping only credential flags and bare creds.
+
+    Designed for aliyun-prefixed commands (MCP CallCLI or Bash `aliyun ...`).
+    aliyun commands are considered non-sensitive Alibaba Cloud operations and
+    are captured verbatim for remote audit; this function only scrubs inline
+    AccessKey credentials as defense-in-depth (the documented workflow uses
+    `aliyun configure`, not inline `--access-key-*` flags).
+
+    Output capped at ALIYUN_CLI_MAX_LEN chars.
+    """
+    if cmd is None:
+        return ""
+    s = str(cmd).strip()[:ALIYUN_CLI_MAX_LEN * 4]
+    tokens = s.split()
+    clean: list[str] = []
+    skip_next = False
+    for tok in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        low = tok.lower()
+        if low in _ALIYUN_CLI_STRIP_FLAGS or low.lstrip("-") in (
+            "access-key-id", "access-key-secret", "secret-key",
+            "sts-token", "security-token", "password", "passwd",
+        ):
+            skip_next = True
+            continue
+        if "=" in tok:
+            flag_part = tok.split("=", 1)[0].lower()
+            if flag_part in _ALIYUN_CLI_STRIP_FLAGS:
+                continue
+        if re.match(r"^LTAI[A-Za-z0-9]{8,}", tok):
+            continue
+        if re.match(r"^STS\.[A-Za-z0-9+/=]{10,}", tok):
+            continue
+        if re.match(r"^eyJ[A-Za-z0-9_-]{10,}\.", tok):
+            continue
+        clean.append(tok)
+    return " ".join(clean)[:ALIYUN_CLI_MAX_LEN]
+
+
+def sanitize_tool_input(value) -> str:
+    """JSON-serialize an MCP tool_input dict and strip embedded credentials.
+
+    Used for non-CallCLI MCP `AlibabaCloud___*` tools (ListProducts,
+    SearchApis, GetApiDefinition, etc.) whose input shape is free-form. The
+    input is considered aliyun operational context and captured verbatim,
+    but inline AccessKey / STS / JWT / PEM / Bearer credentials are scrubbed
+    as defense-in-depth (via the standard `_CRED_PATTERNS` set).
+
+    Accepts dict / list / str / None. Returns a JSON-encoded string capped at
+    TOOL_INPUT_MAX_LEN chars (sorted keys, compact separators, UTF-8 safe).
+    """
+    if value is None or value == "" or value == {} or value == []:
+        return ""
+    if isinstance(value, str):
+        s = value
+    else:
+        try:
+            s = json.dumps(
+                value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
+        except (TypeError, ValueError):
+            s = str(value)
+    s = s[:TOOL_INPUT_MAX_LEN * 2]
+    for pat in _CRED_PATTERNS:
+        s = pat.sub("***", s)
+    return s[:TOOL_INPUT_MAX_LEN]
 
 
 # --- Error classification (Finding #3) -------------------------------------
@@ -244,6 +329,75 @@ if __name__ == "__main__":
     for input_, expected in cases_cli:
         got = sanitize_cli(input_)
         assert got == expected, f"sanitize_cli({input_!r}) = {got!r}, expected {expected!r}"
+
+    cases_aliyun_cli = [
+        # Full command preserved (region kept; --endpoint and --profile kept)
+        ("aliyun ecs DescribeInstances --region cn-hangzhou",
+         "aliyun ecs DescribeInstances --region cn-hangzhou"),
+        ("aliyun oss ls --endpoint-url https://oss.cn-hangzhou.aliyuncs.com",
+         "aliyun oss ls --endpoint-url https://oss.cn-hangzhou.aliyuncs.com"),
+        ("aliyun ecs DescribeInstances --profile prod",
+         "aliyun ecs DescribeInstances --profile prod"),
+        # Credential flags + values stripped
+        ("aliyun ecs DescribeInstances --access-key-id LTAItestFAKEnotREAL1234 --access-key-secret mySec",
+         "aliyun ecs DescribeInstances"),
+        ("aliyun ecs DescribeInstances --region cn-hangzhou --sts-token STS.NSxeSfaZr123abcDEF456",
+         "aliyun ecs DescribeInstances --region cn-hangzhou"),
+        # --flag=value form
+        ("aliyun ecs DescribeInstances --access-key-id=LTAItestFAKEnotREAL1234 --region cn-beijing",
+         "aliyun ecs DescribeInstances --region cn-beijing"),
+        # Bare credential token (defense-in-depth)
+        ("aliyun ecs DescribeInstances LTAItestFAKEnotREAL1234",
+         "aliyun ecs DescribeInstances"),
+        # JSON --body preserved (multi-word value joins back since shell tokens are kept)
+        ("aliyun ecs CreateInstance --InstanceType ecs.t5-lc1m1.small --ImageId centos_7",
+         "aliyun ecs CreateInstance --InstanceType ecs.t5-lc1m1.small --ImageId centos_7"),
+        # Empty / minimal
+        ("aliyun", "aliyun"),
+        ("", ""),
+    ]
+    for input_, expected in cases_aliyun_cli:
+        got = sanitize_aliyun_cli(input_)
+        assert got == expected, f"sanitize_aliyun_cli({input_!r}) = {got!r}, expected {expected!r}"
+
+    # Length cap
+    long_cmd = "aliyun ecs DescribeInstances " + ("--foo bar " * 500)
+    long_out = sanitize_aliyun_cli(long_cmd)
+    assert len(long_out) <= ALIYUN_CLI_MAX_LEN, f"sanitize_aliyun_cli exceeded cap: {len(long_out)}"
+
+    cases_tool_input = [
+        # Simple dict → sorted compact JSON
+        ({"filter": "Ecs"}, '{"filter":"Ecs"}'),
+        # Multi-key dict → keys sorted
+        ({"product": "Ecs", "apiVersion": "2014-05-26", "apiName": "DescribeInstances"},
+         '{"apiName":"DescribeInstances","apiVersion":"2014-05-26","product":"Ecs"}'),
+        # Empty / None
+        (None, ""),
+        ({}, ""),
+        ("", ""),
+        ([], ""),
+        # Already-string passes through with scrub
+        ('{"k":"v"}', '{"k":"v"}'),
+        # Credential scrubbing: ak=value pattern → *** (only the cred token, not trailing text)
+        ({"prompt": "use ak=LTAItestFAKEnotREAL1234 for ecs"},
+         '{"prompt":"use *** for ecs"}'),
+        # Bearer token scrub
+        ({"prompt": "Authorization: Bearer abc123def456"},
+         '{"prompt":"Authorization: ***"}'),
+        # Bare LTAI* scrub when not inside a JSON-key context
+        ({"note": "token LTAItestFAKEnotREAL1234 leaked"},
+         '{"note":"token *** leaked"}'),
+        # UTF-8 preserved (ensure_ascii=False)
+        ({"prompt": "查询北京区域"}, '{"prompt":"查询北京区域"}'),
+    ]
+    for input_, expected in cases_tool_input:
+        got = sanitize_tool_input(input_)
+        assert got == expected, f"sanitize_tool_input({input_!r}) = {got!r}, expected {expected!r}"
+
+    # Length cap for tool_input
+    big_input = {"prompt": "x" * 10000}
+    big_out = sanitize_tool_input(big_input)
+    assert len(big_out) <= TOOL_INPUT_MAX_LEN, f"sanitize_tool_input exceeded cap: {len(big_out)}"
 
     cases_classify = [
         ("NoPermission: you are not authorized", "NoPermission"),

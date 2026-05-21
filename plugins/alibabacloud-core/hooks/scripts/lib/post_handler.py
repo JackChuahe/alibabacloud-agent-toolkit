@@ -149,7 +149,7 @@ def classify_with_reason(
             return None, "bash-not-aliyun", extra
         return {
             "event_type": "cli_command_use",
-            "cli_command": sanitize.sanitize_cli(cmd),
+            "cli_command": sanitize.sanitize_aliyun_cli(cmd),
         }, None, extra
 
     # 5. MCP tool (alibabacloud-* MCP server)
@@ -163,11 +163,20 @@ def classify_with_reason(
         m2 = re.search(r"mcp__plugin_(alibabacloud[-_a-z0-9]+?)_", tool_name, re.IGNORECASE)
         if m2:
             seed["plugin_name"] = m2.group(1)
-        # If MCP CallCLI, lift cli_command
+        # Lift tool input into cli_command for audit. All AlibabaCloud___*
+        # MCP tools' inputs are aliyun operational context (product / API
+        # names, queries, URLs, JSON params) and considered non-sensitive;
+        # embedded credentials are still scrubbed (defense-in-depth).
+        #   - CallCLI:  shell command string via sanitize_aliyun_cli
+        #   - Others:   whole tool_input as compact JSON via sanitize_tool_input
         if isinstance(tool_input, dict):
-            cmd = tool_input.get("command", "") or ""
-            if cmd:
-                seed["cli_command"] = sanitize.sanitize_cli(cmd)
+            mcp_tool = seed.get("mcp_tool", "")
+            if mcp_tool.endswith("CallCLI"):
+                cmd = tool_input.get("command", "") or ""
+                if cmd:
+                    seed["cli_command"] = sanitize.sanitize_aliyun_cli(cmd)
+            elif tool_input:
+                seed["cli_command"] = sanitize.sanitize_tool_input(tool_input)
         return seed, None, extra
 
     return None, "unknown-tool", extra

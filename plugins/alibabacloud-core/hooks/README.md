@@ -220,14 +220,16 @@ omitted (we never generate a caller-side UUID).
 
 ### Sanitization (`lib/sanitize.py`)
 
-Two functions, both bounded:
+Four functions, all bounded:
 
 - `sanitize_error(msg)` — caps prefix at `200 * 4` chars for regex safety, then truncates output to `200` chars. Rules:
   - Credentials: `(ak|sk|pk|key|secret|password|token|credential|accesskey)\s*=\s*\S+` → `<keyword>=***`
   - `Bearer <token>` → `***`
   - `/Users/<name>/`, `/home/<name>/`, `C:\Users\<name>\` → `/<USER>/`
   - Email, CN mobile, IPv4, UUID v4 → `<REDACTED>`
-- `sanitize_cli(cmd)` — keeps the first 3 whitespace-separated tokens, capped at 120 chars (drops args / values that may carry IDs)
+- `sanitize_cli(cmd)` — legacy helper: keeps the first 3 whitespace-separated tokens, capped at 120 chars (drops args / values that may carry IDs). Not used by the current event pipeline.
+- `sanitize_aliyun_cli(cmd)` — used for `cli_command_use` (Bash `aliyun ...`) and MCP `AlibabaCloud___CallCLI`. Keeps the full command verbatim (operational context for Alibaba Cloud audit) and strips only credential flags + values: `--access-key-id`, `--access-key-secret`, `--secret`, `--secret-key`, `--password`, `--passwd`, `--sts-token`, `--security-token` (both `--flag value` and `--flag=value` forms). Also drops bare `LTAI*` / `STS.*` / JWT tokens as defense-in-depth. Capped at 2000 chars. `--endpoint`, `--endpoint-url`, and `--profile` are intentionally kept — they are operational context, not secrets.
+- `sanitize_tool_input(value)` — used for all **non-CallCLI** MCP `AlibabaCloud___*` tools (`ListProducts`, `ListApis`, `ListProductRegions`, `SearchApis`, `SearchDocument`, `GetApiDefinition`, `GenerateCLICommand`, `ReadDocument`, …). JSON-serializes the `tool_input` dict (sorted keys, compact separators, UTF-8 safe) and runs the full `_CRED_PATTERNS` set against the serialized string (AccessKey / STS / JWT / PEM / Bearer / long base64 blobs → `***`). Capped at 4000 chars. The serialized JSON is uploaded via the same `--cli-command` flag (it carries either a shell command for CallCLI, or a JSON-encoded tool input for other MCP tools — distinguish by `--mcp-tool`).
 
 ### Bounds
 
@@ -237,7 +239,7 @@ Two functions, both bounded:
 | JSON parse window            | 16 KB                | covers ~100% of real error responses; <2 ms parse                                      |
 | Error regex window           | 500 chars            | first error line; avoids catastrophic backtracking                                     |
 | `--error-message` length     | 200 chars            | post-sanitization                                                                      |
-| `--cli-command` length       | 120 chars / 3 tokens | safe command shape only                                                                |
+| `--cli-command` length       | 2000 / 4000 chars    | 2000 for CallCLI shell command (`sanitize_aliyun_cli`); 4000 for other MCP tools' JSON-encoded inputs (`sanitize_tool_input`) |
 | `pre` / `stop` hook timeout  | 3 s                  | configured in `hooks.json`                                                             |
 | `post` / `post-failure` timeout | 15 s              | upload is fire-and-forget, doesn't count toward this                                   |
 | Lock acquisition timeout     | 2 s                  | `_try_flock_exclusive` in `state.py`                                                   |
