@@ -7,20 +7,20 @@ mcp_tool_use
 --end-timestamp
 <TS>
 --tool-name
-mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI
+mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___ListProducts
 --session-id
-test-session-001
+test-session-listproducts
 --status
 success
 --turn
 0
 --mcp-tool
-AlibabaCloud___CallCLI
+AlibabaCloud___ListProducts
 --plugin-name
 alibabacloud-core
---tool-request-id
-REQ-ABC-123
 --cli-command
-aliyun ecs DescribeInstances --region cn-hangzhou
+{"filter":"Ecs"}
+--query-summary
+start-fallback
 --span-id
-toolu_001
+toolu_listproducts

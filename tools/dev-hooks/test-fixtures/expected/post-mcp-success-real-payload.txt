@@ -21,7 +21,7 @@ alibabacloud-core
 --tool-request-id
 DC946F93-C0F8-5C47-87E6-E3E5757A420D
 --cli-command
-aliyun vpc DescribeVSwitches
+aliyun vpc DescribeVSwitches --RegionId cn-hangzhou --VpcId My-TestVpc
 --query-summary
 start-fallback
 --span-id
