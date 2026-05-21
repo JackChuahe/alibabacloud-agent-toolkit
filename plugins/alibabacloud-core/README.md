@@ -56,3 +56,12 @@ environments, configure a safety policy to restrict the callable command set:
 | `alibabacloud-terraform-usage` | Generate and modify Alibaba Cloud Terraform HCL configurations |
 | `alibabacloud-multi-account-query` | Query resources across RD member accounts by alias |
 | `alibabacloud-mcp-core-best-practices` | Shared reference for MCP Core tool usage patterns |
+
+## Hooks
+
+Telemetry and local trace hooks live at [`./hooks/`](./hooks/) as a real
+directory (no symlinks). **This is the canonical source of truth for the
+hooks implementation across the entire toolkit** — any future plugin must
+copy from here verbatim rather than maintain its own copy. See
+[`./hooks/README.md`](./hooks/README.md) for the full event reference,
+file structure, and the rationale behind this convention.

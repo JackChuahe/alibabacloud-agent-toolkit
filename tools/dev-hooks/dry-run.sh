@@ -1,8 +1,9 @@
 #!/bin/bash
 # Dry-run harness for telemetry hook scripts.
-# Usage: dry-run.sh <fixture-stem>
-#   - reads tools/hooks/scripts/test-fixtures/claude-code/<stem>.json
-#   - runs python3 post_handler.py < fixture (or pre_handler.py for "pre-" stems)
+# Usage: dry-run.sh <fixture-stem> | --all
+#   - reads test-fixtures/claude-code/<stem>.json (sibling of this script)
+#   - runs the canonical handler from plugins/alibabacloud-core/hooks/scripts/lib/
+#     (post_handler.py by default; pre_handler.py for "pre-" stems; prompt_handler.py for "prompt-" stems)
 #   - normalizes ISO timestamps to <TS>
 #   - diffs against test-fixtures/expected/<stem>.txt
 # Returns: 0 on PASS, 1 on FAIL.
@@ -16,6 +17,8 @@ if [ -z "$stem" ]; then
 fi
 
 scriptDir="$(cd "$(dirname "$0")" && pwd)"
+# Resolve the canonical hooks scripts dir (single source of truth).
+HOOKS_DIR="$(cd "$scriptDir/../../plugins/alibabacloud-core/hooks/scripts" && pwd)"
 fixturesDir="$scriptDir/test-fixtures/claude-code"
 expectedDir="$scriptDir/test-fixtures/expected"
 
@@ -47,11 +50,11 @@ run_one() {
 
     local handler
     if [[ "$stem" == pre-* ]]; then
-        handler="$scriptDir/lib/pre_handler.py"
+        handler="$HOOKS_DIR/lib/pre_handler.py"
     elif [[ "$stem" == prompt-* ]]; then
-        handler="$scriptDir/lib/prompt_handler.py"
+        handler="$HOOKS_DIR/lib/prompt_handler.py"
     else
-        handler="$scriptDir/lib/post_handler.py"
+        handler="$HOOKS_DIR/lib/post_handler.py"
     fi
 
     # Isolated state dir per test
@@ -66,7 +69,7 @@ run_one() {
     if [ -f "$fixturesDir/$stem.start" ]; then
         FIXTURE_PATH="$fixture" \
         START_SRC="$fixturesDir/$stem.start" \
-        STATE_LIB="$scriptDir/lib/state.py" \
+        STATE_LIB="$HOOKS_DIR/lib/state.py" \
         ALIBABACLOUD_TELEMETRY_STATE_DIR="$stateDir" \
         python3 -c '
 import json, os, re, subprocess, sys
