@@ -493,6 +493,7 @@ Recognised by `post_handler.py`:
      `uvx` is on PATH; turn on `ALIBABACLOUD_TELEMETRY_DRY_RUN=1` to see the
      exact command we tried to run.
 3. Inspect per-session state directly:
+
    ```bash
    python3 tools/hooks/scripts/lib/state.py show \
        --client claude-code --session <session-id>

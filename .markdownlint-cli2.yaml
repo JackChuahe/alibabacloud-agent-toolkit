@@ -19,3 +19,5 @@ config:
   MD041: false
   MD060: false
 frontMatter: "^---\\s*$[\\s\\S]*?^---\\s*$"
+ignores:
+  - "docs/superpowers/**"
