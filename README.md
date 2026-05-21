@@ -163,7 +163,6 @@ Opens `http://localhost:18321` in your browser automatically.
 2. `~/.cache/alibabacloud-agent-toolkit/telemetry/`
 3. `/tmp/alibabacloud-agent-toolkit-telemetry-<uid>/`
 
-
 **Disable local trace:**
 
 ```bash
@@ -171,7 +170,6 @@ export ALIBABACLOUD_TRACE=false
 ```
 
 See [`tools/hooks/README.md`](tools/hooks/README.md) for full field reference and file structure.
-
 
 ## Skills
 
