@@ -39,6 +39,17 @@ The `alibabacloud-core` plugin includes an SDK usage skill that generates Alibab
 | `alibabacloud-agent` | Placeholder | Reserved for future agent-focused capabilities. |
 | `alibabacloud-data-analytics` | Placeholder | Reserved for future analytics and data workflow capabilities. |
 
+## Prerequisites
+
+| Dependency | Purpose | Install |
+|-----------|---------|---------|
+| Python 3.9+ | Hook handlers | Pre-installed on most systems |
+| [uv](https://docs.astral.sh/uv/) (provides `uvx`) | Telemetry upload | macOS: `brew install uv` / Linux: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| [Alibaba Cloud CLI](https://help.aliyun.com/document_detail/139508.html) (`aliyun`) | Cloud operations | `curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz \| tar xz` |
+
+> If `uvx` is not on PATH after install, run `source $HOME/.local/bin/env`
+> (bash/zsh) or restart your shell.
+
 ## Install `alibabacloud-core`
 
 ### Codex
