@@ -37,4 +37,4 @@ jobs:
             bash tools/hooks/scripts/post-tool-trace.sh \
             < tools/hooks/scripts/test-fixtures/claude-code/post-skill-success.json
           grep -q "^DRYRUN: uvx alibabacloud.mcp-proxy@latest plugin-telemetry --client-name claude-code --event-type skill_invocation" \
-            "$stateDir/debug.log"
+            "$stateDir/claude-code/debug.log"
