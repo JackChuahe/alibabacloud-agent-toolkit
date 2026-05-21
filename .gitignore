@@ -17,3 +17,8 @@ build/
 
 # Test scratch
 tools/hooks/scripts/test-fixtures/.scratch/
+
+# Superpowers design docs (local only)
+docs/superpowers/
+superpowers/
+.superpowers/
