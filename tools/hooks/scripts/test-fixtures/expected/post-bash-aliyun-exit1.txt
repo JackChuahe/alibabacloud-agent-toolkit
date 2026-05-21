@@ -1,0 +1,24 @@
+--client-name
+claude-code
+--event-type
+cli_command_use
+--start-timestamp
+<TS>
+--end-timestamp
+<TS>
+--tool-name
+Bash
+--session-id
+test-session-bashfail
+--status
+failure
+--turn
+0
+--cli-command
+aliyun ecs DescribeInstances
+--query-summary
+start-fallback
+--error-message
+ConnectionRefused
+--span-id
+toolu_bashfail
