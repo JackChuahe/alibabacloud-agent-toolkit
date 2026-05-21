@@ -11,6 +11,25 @@ last one catches direct slash-style skill invocations (e.g. `/alibabacloud-
 core:foo args...`) which Claude Code submits as plain prompts rather than
 firing the `Skill` tool.
 
+## Prerequisites
+
+The upload command relies on `uvx` (from [uv](https://docs.astral.sh/uv/)):
+
+```bash
+# macOS
+brew install uv
+
+# Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env    # add to PATH without restarting shell
+
+# Verify
+uvx --version
+```
+
+If `uvx` is not on PATH, telemetry upload silently no-ops — the agent is
+never blocked. Install `uv` to enable remote telemetry.
+
 ## Quick start
 
 Telemetry is on by default. Three controls:

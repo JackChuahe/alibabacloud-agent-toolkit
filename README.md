@@ -39,6 +39,33 @@ The `alibabacloud-core` plugin includes an SDK usage skill that generates Alibab
 | `alibabacloud-agent` | Placeholder | Reserved for future agent-focused capabilities. |
 | `alibabacloud-data-analytics` | Placeholder | Reserved for future analytics and data workflow capabilities. |
 
+## Prerequisites
+
+**Python 3.10+** — hook handlers (pre-installed on most systems).
+
+**[uv](https://docs.astral.sh/uv/)** (provides `uvx`) — telemetry tracing view & mcp server:
+
+```bash
+# macOS
+brew install uv
+```
+
+```
+# Linux / WSL
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source $HOME/.local/bin/env
+```
+
+**[Alibaba Cloud CLI](https://help.aliyun.com/document_detail/139508.html)** (`aliyun`) — cloud operations:
+
+```bash
+# Linux amd64
+curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz | tar xz
+
+# macOS
+brew install aliyun-cli
+```
+
 ## Install `alibabacloud-core`
 
 ### Codex
@@ -66,6 +93,83 @@ openapiexplorer:*=allow,*=deny
 ```
 
 The SDK skill is restricted to `mcp__alibabacloud-core__AlibabaCloud___CallCLI`, so OpenAPI Explorer metadata is queried through the configured MCP server instead of unrestricted shell execution.
+
+## Telemetry & Tracing
+
+### Remote Telemetry
+
+This plugin collects anonymous usage telemetry to help improve product quality. Collection is **strictly limited to Alibaba Cloud tool calls** — no user prompts, code content, or file paths are transmitted.
+
+**What is collected:**
+
+- Tool name (e.g. `AlibabaCloud___CallCLI`)
+- Call status (success / failure) and error code
+- Request ID (Alibaba Cloud API request tracking)
+- Duration and timestamp
+
+**Privacy protection:**
+
+- All AccessKey, STS tokens, passwords, and PII are stripped before transmission
+- No prompt text, tool input parameters, or response content is sent
+- Data is transmitted to Alibaba Cloud observability endpoints only
+
+**Disable remote telemetry:**
+
+```bash
+export ALIBABACLOUD_TELEMETRY=false
+```
+
+### Local Audit Trace
+
+The plugin provides a transparent, auditable local trace in JSONL format. This gives you full visibility into every Alibaba Cloud tool interaction — including prompts, inputs, and complete responses — stored locally on your machine for self-audit and visualization.
+
+**What is recorded locally:**
+
+- User prompts (for turns that invoke Alibaba Cloud tools)
+- Full tool inputs and responses (truncated at 64 KB)
+- Skill invocations, timing, span hierarchy
+- Turn lifecycle events
+
+**Trace files are per-session:**
+
+```text
+~/.cache/alibabacloud-agent-toolkit/telemetry/<client>/traces/<session-id>.jsonl
+```
+
+Local traces are never uploaded. Light sanitization (AK/SK, tokens, phone, email) is applied even locally. Trace files older than **90 days** are automatically cleaned up on each session stop to prevent unbounded disk growth.
+
+### Local Telemetry Visualization
+
+`telemetry-view` starts a local web server for browsing and analyzing trace data. Supports multi-client session browsing (Claude Code, VS Code, Copilot CLI, Codex, Qoderwork), span hierarchy tree, Gantt timeline, Graph flow chart, and live updates.
+
+**Start:**
+
+```bash
+uvx alibabacloud.mcp-proxy@latest telemetry-view
+```
+
+Opens `http://localhost:18321` in your browser automatically.
+
+**Options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--port` | `18321` | Local server port |
+| `--no-open` | - | Don't auto-open browser |
+
+**Data sources** (scanned automatically):
+
+1. `$ALIBABACLOUD_TELEMETRY_STATE_DIR` (if set)
+2. `~/.cache/alibabacloud-agent-toolkit/telemetry/`
+3. `/tmp/alibabacloud-agent-toolkit-telemetry-<uid>/`
+
+**Disable local trace:**
+
+```bash
+export ALIBABACLOUD_TRACE=false
+```
+
+See [`tools/hooks/README.md`](tools/hooks/README.md) for full field reference and file structure.
 
 ## Skills
 

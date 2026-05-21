@@ -158,6 +158,7 @@ def main() -> int:
         # Opportunistic cleanup (cheap)
         try:
             cleanup_stale_sessions(client)
+            trace_writer.cleanup_stale_traces()
         except Exception:
             pass
         return 0
@@ -165,6 +166,7 @@ def main() -> int:
     _debug(f"[stop] turn={new_turn} session={session_id} client={client} decision=no-emit")
     try:
         cleanup_stale_sessions(client)
+        trace_writer.cleanup_stale_traces()
     except Exception:
         pass
     return 1

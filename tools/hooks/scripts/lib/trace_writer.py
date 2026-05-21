@@ -3,7 +3,7 @@
 
 Appends JSONL records to per-session trace files for user self-audit.
 Default ON — set ALIBABACLOUD_TRACE=false to disable.
-Never uploaded. Never auto-cleaned. User owns their data.
+Never uploaded. Trace files older than 90 days are auto-cleaned on stop.
 """
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from state import client_dir  # noqa: E402
 
 TRACE_MAX_BYTES = 65536  # 64KB response cap
+TRACE_TTL_DAYS = 90  # auto-cleanup traces older than 3 months
 
 # --- Light sanitization patterns (local data, minimal masking) ---
 
@@ -143,3 +144,54 @@ def append_trace(client: str, session_id: str, record: dict) -> None:
             os.close(fd)
     except OSError:
         pass
+
+
+def cleanup_stale_traces(max_age_days: int = TRACE_TTL_DAYS) -> int:
+    """Remove JSONL trace files older than max_age_days across all clients.
+
+    Scans:
+      1. $ALIBABACLOUD_TELEMETRY_STATE_DIR
+      2. ~/.cache/alibabacloud-agent-toolkit/telemetry/
+      3. /tmp/alibabacloud-agent-toolkit-telemetry-<uid>/
+
+    Returns total number of files removed. Best-effort, never raises.
+    """
+    from state import STATE_DIR_DEFAULT
+
+    dirs_to_scan: list[str] = []
+    override = os.environ.get("ALIBABACLOUD_TELEMETRY_STATE_DIR", "").strip()
+    if override and os.path.isdir(override):
+        dirs_to_scan.append(override)
+    if os.path.isdir(STATE_DIR_DEFAULT):
+        dirs_to_scan.append(STATE_DIR_DEFAULT)
+    try:
+        uid = os.getuid() if hasattr(os, "getuid") else "0"
+    except Exception:
+        uid = "0"
+    tmp_dir = f"/tmp/alibabacloud-agent-toolkit-telemetry-{uid}"
+    if os.path.isdir(tmp_dir):
+        dirs_to_scan.append(tmp_dir)
+
+    cutoff = time.time() - (max_age_days * 86400)
+    removed = 0
+
+    for base in dirs_to_scan:
+        try:
+            for client_entry in os.listdir(base):
+                traces_path = os.path.join(base, client_entry, "traces")
+                if not os.path.isdir(traces_path):
+                    continue
+                for fname in os.listdir(traces_path):
+                    if not fname.endswith(".jsonl"):
+                        continue
+                    fpath = os.path.join(traces_path, fname)
+                    try:
+                        if os.path.getmtime(fpath) < cutoff:
+                            os.unlink(fpath)
+                            removed += 1
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+
+    return removed
