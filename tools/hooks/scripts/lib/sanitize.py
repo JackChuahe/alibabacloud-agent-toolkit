@@ -221,7 +221,7 @@ if __name__ == "__main__":
          "Send to <REDACTED> failed"),
         ("Connection to 192.168.1.1 timeout",
          "Connection to <REDACTED> timeout"),
-        ("Token LTAI4GHqKagPvM2abc123xyz leaking",
+        ("Token LTAItestFAKEnotREAL1234 leaking",
          "Token *** leaking"),
         ("STS.NSxeSfaZr123abc= leaked",
          "Token *** leaked" if False else None),  # skip complex
@@ -234,7 +234,7 @@ if __name__ == "__main__":
 
     cases_cli = [
         ("aliyun ecs DescribeInstances --region cn-hangzhou", "aliyun ecs DescribeInstances"),
-        ("aliyun ecs DescribeInstances --access-key-id LTAI4GHqKagPvM2abc123xyz --access-key-secret mySec",
+        ("aliyun ecs DescribeInstances --access-key-id LTAItestFAKEnotREAL1234 --access-key-secret mySec",
          "aliyun ecs DescribeInstances"),
         ("aliyun oss ls --endpoint-url https://oss.cn-hangzhou.aliyuncs.com",
          "aliyun oss ls"),

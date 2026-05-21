@@ -7,5 +7,5 @@ paths = [
 ]
 regexes = [
   # Fake AK used in sanitization test fixtures (not a real credential)
-  '''LTAI4GHqKagPvM2abc123xyz''',
+  '''LTAItestFAKEnotREAL1234''',
 ]
