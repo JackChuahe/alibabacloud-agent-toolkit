@@ -1,387 +1,480 @@
 ---
 name: alibabacloud-terraform-codegen
-description: "Generate and modify Alibaba Cloud Terraform HCL code. Triggers on phrases like: write Terraform for Alibaba Cloud, create alicloud Terraform config, generate HCL for ECS, Terraform code for VPC, alicloud infrastructure as code, Terraform resource for RDS, modify Terraform configuration, alicloud provider Terraform."
+description: |
+  Use when the user wants Terraform HCL for Alibaba Cloud (Alicloud) infrastructure —
+  new project or extending an existing one. Covers VPC, ECS, ApsaraDB RDS, OSS,
+  SLB / ALB, Function Compute v3, ACK, and any other `alicloud_*` resource via the
+  provider's own documentation fetched at generation time. For AWS → Alicloud
+  migration or importing existing resources into state, use a different skill.
+  Triggers: "write terraform for alicloud", "generate alibaba cloud terraform",
+  "alicloud HCL", "create alibaba cloud vpc/ecs/rds", "生成阿里云 Terraform",
+  "阿里云 HCL", "用 Terraform 部署阿里云", "alicloud provider", "aliyun/alicloud",
+  "terraform-provider-alicloud".
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.1.0"
-compatibility:
-  tools:
-    - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___CallCLI
-    - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___SearchDocument
-    - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___ReadDocument
+  version: "0.2.0"
 ---
 
-# Alibaba Cloud Terraform Code Generator
+# Alibaba Cloud Terraform Code Generation
 
-Generate and modify production-quality Alibaba Cloud Terraform (HCL) configurations from natural language descriptions.
+Turn natural-language Alibaba Cloud infrastructure requirements into validated
+Terraform for the current `aliyun/alicloud` provider. Resource knowledge is
+pulled from the provider's own docs at generation time — no local gold examples
+are maintained.
 
-## Safety Rules
+## Hard rules (never violate)
 
-1. **ONLY use the `alibabacloud` MCP server tools.** The permitted tools are:
-   - `AlibabaCloud___CallCLI` — Execute IaCService CLI commands to query Terraform product/resource metadata
-   - `AlibabaCloud___SearchDocument` — Search Alibaba Cloud documentation by keyword to find relevant document URLs
-   - `AlibabaCloud___ReadDocument` — Read a specific document by URL (must use URLs obtained from `SearchDocument`)
-2. **Do NOT execute `terraform plan`, `terraform apply`, or any other Terraform commands locally.** Generated HCL code is for review. Execution is handled by the `alibabacloud:executing-plans` skill via remote IaC Service.
-3. **Always remind the user to review the generated HCL** before execution, especially when resources involve costs, data deletion, or security-sensitive configurations.
+### 1. Credentials — never leak, never require
 
-## IaCService API Reference
+NEVER read, print, ask for, or write AK/SK values anywhere — HCL, comments, env
+declarations, shell output, logs. The alicloud provider resolves credentials
+through seven mechanisms (env AK/SK, shared `config.json`, ECS instance RAM
+role, Assume Role, OIDC/RRSA, sidecar URI, static HCL) — see
+`references/auth-and-network.md` for the full chain. All read by the provider
+itself, never by this skill. Do NOT recommend the deprecated `ALICLOUD_*` /
+`ALIBABACLOUD_*` (no-underscore) env-var names — the current names are
+`ALIBABA_CLOUD_ACCESS_KEY_ID` / `_ACCESS_KEY_SECRET` / `_SECURITY_TOKEN`.
 
-All IaCService APIs are invoked through `AlibabaCloud___CallCLI`:
+### 2. Honest reporting — never claim a step you didn't run
 
-| API | CLI Command | Purpose |
-| --- | ----------- | ------- |
-| ListProducts | `aliyun iacservice list-products` | List all Alibaba Cloud products that support Terraform |
-| ListResourceTypes | `aliyun iacservice list-resource-types --product <product>` | List Terraform resource types for a specific product |
-| GetResourceType | `aliyun iacservice get-resource-type --resource-type <resourceType>` | Get all attributes and schema for a Terraform resource type (e.g., `alicloud_vpc`) |
-| ValidateModule | `aliyun iacservice validate-module --template-body <tf-content>` | Validate Terraform syntax without execution |
+Never report `fmt: ok` / `validate: ok` / `plan: ok` unless the corresponding
+command actually executed AND returned that status. When a step is skipped
+(tool missing, user opt-out), state **"SKIPPED"** (or **"FAILED"**) with a
+reason. Paraphrasing real output is fine; fabricating it is not.
+
+### 3. `terraform apply` is off-limits
+
+This skill NEVER runs `terraform apply`. `plan` is opt-in (Step 8); `apply` is
+strictly the user's action.
+
+## Environment (soft recommendations)
+
+- **Terraform ≥ 1.5** recommended. Do not install or download Terraform
+  automatically; Step 6 checks whether `terraform` is on PATH and reports
+  the actual validation status.
+- **Network** is required — Step 4.2 WebFetches each resource's provider doc.
 
 ## Workflow
 
-Follow these steps strictly in order:
+### Step 1. Parse requirement
 
-### Step 1: Understand the User's Intent
+Extract:
 
-Parse the user's natural language request to identify:
-- The target Alibaba Cloud service(s) (e.g., ECS, VPC, RDS, OSS, SLB, ACK)
-- The desired infrastructure (e.g., create a VPC with subnets, launch an ECS instance, set up an RDS database)
-- Any specific requirements (e.g., region, instance type, CIDR blocks, security group rules)
-- Whether this is a new configuration or a modification to existing HCL code
+- `region` — default `cn-hangzhou`.
+- `resources[]` — `{ alicloud_type, quantity, attributes }`.
+- Non-functional: multi-AZ, encryption, backup, HA, IOPS.
 
-### Step 2: Discover Supported Products and Resource Types
+If ambiguous (e.g. "搭个数据库"), ask **at most one** clarifying question.
 
-Call `AlibabaCloud___CallCLI` with `aliyun iacservice list-products` to confirm the target product supports Terraform.
+### Step 2. Resolve target directory
 
-Then call `AlibabaCloud___CallCLI` with `aliyun iacservice list-resource-types --product <product>` to discover the correct Terraform resource type names (e.g., `alicloud_vpc`, `alicloud_instance`, `alicloud_db_instance`).
+Extract `<target-dir>` from the user's request (explicit path like
+`myshop-infra/` or current working directory if unspecified). All subsequent
+`fmt` / `init` / `validate` commands run in this directory.
 
-- If the user's request spans multiple products, query each product separately
-- Present the matched resource types to the user if there is ambiguity
+Before writing any `.tf` file, **MUST** create the directory:
 
-### Step 3: Get Resource Type Schema
+```bash
+mkdir -p <target-dir>
+```
 
-Call `AlibabaCloud___CallCLI` with `aliyun iacservice get-resource-type --resource-type <resourceType>` (e.g., `--resource-type alicloud_vpc`) to retrieve the full attribute schema.
+All file writes MUST prefix paths with `<target-dir>/` — never write to
+the current working directory directly, never write to a generic `outputs/`
+parent. After generation completes, verify the structure:
 
-- Identify all required and optional attributes
-- Understand attribute types, constraints, and valid values
-- Note any attribute dependencies or conflicts
+```bash
+ls -R <target-dir>
+```
 
-### Step 4: Consult Terraform Documentation
+### Step 3. Sketch architecture
 
-Documentation lookup is a **two-step process**:
+Before any HCL, sketch a dependency table — one row per resource:
 
-1. **Search**: Use `AlibabaCloud___SearchDocument` with the resource type name (e.g., `alicloud_vpc`) as the keyword to find relevant documentation URLs
-2. **Read**: Use `AlibabaCloud___ReadDocument` with a URL obtained from the search results to read the full document content
+| resource | depends on | AZ / placement |
+| --- | --- | --- |
 
-**Important:** You must always search first to get valid document URLs. Do NOT pass arbitrary URLs or resource names directly to `ReadDocument` — it only accepts URLs returned by `SearchDocument`.
+- Expand `resources[]` with implied infra (VPC → VSwitch → SecurityGroup
+  → workload); user parse often skips these.
+- The expanded list is the input to Step 4's gate.
 
-After reading the documentation:
-- Review usage examples and best practices
-- Understand attribute-level details that may not be captured in the schema
-- Check for known limitations or caveats
-- Look for related data sources that may be useful (e.g., `data.alicloud_zones`, `data.alicloud_instance_types`)
+### Step 4. Pre-HCL gate (MANDATORY)
 
-### Step 5: Generate or Modify HCL Code
+For every distinct `alicloud_*` type from Step 3 (resources **and** data
+sources), execute 4.1 → 4.2 → 4.3. The calls per type are independent —
+**issue them in parallel** across types.
 
-Based on the gathered information, write HCL following the Code Generation Rules and Common Patterns below.
+#### 4.1 Pre-doc lookup (catalog + patterns, in parallel)
 
-### Step 6: Present the Code
+Two local lookups; **run them concurrently** before going to WebFetch:
 
-Present the generated HCL as a **single complete file** with:
-- A brief explanation of the infrastructure being created
-- A list of resources and their relationships
-- Any variables the user needs to customize
-- **A reminder to review before execution**
-- Warnings for any cost-incurring or destructive resources
+**(a) Catalog lookup** — confirm the resource exists and check deprecation.
+The catalog (`references/alicloud-providers.md`) is ~2600 lines; **do NOT
+`Read` it whole** — use `grep`, which returns just the row(s) you need:
 
-**Output format:** One single code block containing ALL terraform code (provider + variables + locals + data + resources + outputs). Do NOT split into separate files or code blocks.
+```bash
+grep "alicloud_<name>" references/alicloud-providers.md
+```
 
-## Error Recovery with Documentation
+Three outcomes:
 
-When you encounter unclear attribute definitions or constraints:
+- **Row found, status column empty** → note the `[doc](<url>)` from the row;
+  proceed to 4.2.
+- **Row found, status `⚠️ 弃用 → `<new_name>`** → switch the plan to
+  `<new_name>` and re-lookup. NEVER emit the deprecated name. Common catch:
+  `alicloud_fc_function` → `alicloud_fcv3_function`.
+- **Row not found** → stop. Ask the user whether the name was a typo;
+  don't invent an `alicloud_<guess>`.
 
-1. Use `AlibabaCloud___SearchDocument` with relevant keywords (resource type name, attribute name, error message) to find documentation URLs
-2. Use `AlibabaCloud___ReadDocument` with the URL from search results to read the full documentation
-3. Cross-reference the schema from `get-resource-type` (via `AlibabaCloud___CallCLI`) with the documentation
-4. Provide the user with links to official documentation for edge cases
+**(b) Pattern lookup** (conditional) — if the user's requirement matches a
+product-specific idiom listed in `references/resource-patterns.md` (e.g.
+RDS cross-AZ HA, OSS lifecycle noncurrent, VPC peering), read the
+relevant section. These idioms are NOT in the provider doc's *Required*
+list but are what the user actually wants (e.g. `zone_id_slave_a` for RDS
+HA is optional per the doc but required for real cross-AZ placement).
+Missing them produces "validates but silently wrong" output.
 
----
+When a matching pattern section is found, **ALL attributes listed in that
+section's "Required attributes" table MUST appear in the generated HCL**
+— treat them as mandatory even if the provider doc marks them Optional.
 
-## Code Generation Rules
+```bash
+# Quick check whether a relevant pattern exists, then Read only the section:
+grep -in "<keyword>" references/resource-patterns.md
+```
 
-1. **Single file only** — ALL generated code MUST be in one file (`main.tf`), never split into multiple files
-2. **File internal order** — `terraform {}` → `provider` → `variables` → `locals` → `data sources` → `resources` → `outputs`
-3. **Always use data sources** for dynamic values (zones, images, instance types)
-4. **Always use variables with defaults** — every variable MUST have a `default` value so the code can deploy without any input
-5. **Always tag resources** with project, environment, managed-by
-6. **Always output** important values (IDs, IPs, endpoints)
-7. **Always encrypt** where supported
-8. **Never expose** credentials, use RAM roles
-9. **Use MCP** to verify resource attributes via `AlibabaCloud___CallCLI` with IaCService APIs
+#### 4.2 Fetch provider doc (WebFetch)
 
-## Provider Configuration
+WebFetch the doc URL from 4.1. If it fails or returns no useful content,
+construct the raw URL directly from the catalog row's `doc` URL. Preserve
+the catalog kind: resources use `website/docs/r/`, data sources use
+`website/docs/d/`.
+
+```
+https://raw.githubusercontent.com/aliyun/terraform-provider-alicloud/master/website/docs/{r|d}/<doc_name>.html.markdown
+```
+
+**If both fail**, fall back to the local catalog row in
+`references/alicloud-providers.md`. Prefix the recitation header with
+`doc unreachable: used local catalog`. **Do NOT fetch any other URL** —
+only the two URLs above or the local catalog are trusted sources.
+
+#### 4.3 Recite (proof-of-read)
+
+Before writing any HCL, emit and verify a complete per-resource brief:
+
+- **Required** params (verbatim list from the doc, or from the local catalog
+  if the 4.2 fallback was taken)
+- **2–5 key Optional** params relevant to the user's requirement
+- A minimal HCL snippet from the doc's "Example Usage" (omit with the note
+  `no example available` only when the fallback was taken)
+
+If Required or Optional params are missing, return to 4.2. Skipping or using
+a partial recitation is a hard failure; WebFetch failure uses the 4.2 fallback,
+not memory.
+
+### Step 5. Generate
+
+#### 5.1 Write HCL from the recitations, not memory
+
+Use ONLY the params established in 4.3. If you need a param that wasn't in the
+recited brief, re-fetch 4.2 with a deeper read; do not guess.
+
+Before writing a field, look up the resource in
+`references/deprecated-fields.md` (see §5.6 for the four row-kinds and
+their handling rules):
+
+```bash
+grep '`alicloud_<resource>`' references/deprecated-fields.md
+```
+
+If the user's requirement touches a product with a specific usage pattern
+(e.g. RDS cross-AZ HA, VPC peering, OSS lifecycle), also consult
+`references/resource-patterns.md` for the non-obvious attributes.
+
+#### 5.2 Data-source enforcement (MANDATORY — no hardcoded IDs)
+
+Resolve via `data` blocks, never literals. These also pass Step 4's gate:
+
+- `zone_id` → `data "alicloud_zones"` (filter by `available_resource_creation`).
+- `image_id` → `data "alicloud_images"` (filter by `name_regex`, `owners = "system"`, `most_recent = true`).
+- `instance_type` → `data "alicloud_instance_types"` (filter by `cpu_core_count`, `memory_size`, AZ).
+
+#### 5.4 Provider block (content contract)
+
+Two Terraform blocks must appear **somewhere** in the project's `*.tf`
+files. Terraform merges all `*.tf` in a directory, so *file organization
+is a style choice, not a contract* — see "File organization" below.
+
+**Block 1 — `terraform { required_providers {} }`**:
 
 ```hcl
 terraform {
-  required_version = ">= 1.3.0"
+  required_version = ">= 1.5"
   required_providers {
     alicloud = {
       source  = "aliyun/alicloud"
-      version = ">= 1.220.0"
+      version = "~> 1.274"
     }
   }
 }
+```
 
+- Provider version: resolve the latest published stable `aliyun/alicloud` 1.x
+  version, then write a pessimistic minor constraint (`1.278.0` -> `~> 1.278`).
+  Lookup sources, in order:
+  1. `https://registry.terraform.io/v1/providers/aliyun/alicloud/versions`
+  2. `https://registry.terraform.io/providers/aliyun/alicloud/latest`
+  3. `https://github.com/aliyun/terraform-provider-alicloud/releases` or
+     `https://github.com/aliyun/terraform-provider-alicloud/tags`
+- If lookup fails, fall back to `~> 1.274`. Accepted form is `~> 1.<minor>`
+  from a confirmed published 1.x release. Do NOT write open-ended constraints
+  (`>= 1.x`, `>= 1.239.0`) or bare version strings.
+
+**Block 2 — `provider "alicloud" {}`** with BOTH `region = var.region`
+and `configuration_source`:
+
+```hcl
 provider "alicloud" {
-  region = var.region
+  region               = var.region
+  configuration_source = "AlibabaCloud-Agent-Toolkit/alibabacloud-spec-ops"
 }
 ```
 
-## HCL Best Practices
+- `configuration_source` is the attribution signature — required.
+- `region` MUST reference `var.region`, not a hardcoded literal.
 
-- **Provider configuration**: Always include `region` in the provider block or as a variable
-- **Resource naming**: Use descriptive resource names (e.g., `alicloud_vpc.main`, `alicloud_instance.web_server`)
-- **Tags**: Include tags for resource identification and cost tracking
-- **Dependencies**: Use `depends_on` only when implicit dependencies are insufficient
-- **Security groups**: Default to restrictive rules; only open necessary ports
-- **State management**: Suggest remote backend configuration for team usage
-- **Single file**: All code in one main.tf — do NOT split into variables.tf, outputs.tf, etc.
+**File organization (recommended, not required)**: conventional split is
+`terraform.tf` (Block 1) + `providers.tf` (Block 2). Also acceptable:
+a single `versions.tf` containing both blocks, or either block at the
+top of `main.tf`. Pick what fits the project — Terraform merges all
+`*.tf` equivalently. Do NOT add a filename check; run the content check
+below instead.
 
-## Principles
+**Post-generation verification (cross-file content grep)**:
 
-- **Correctness** — Always verify resource schemas and documentation before generating code; never guess attribute names or valid values
-- **Best practices** — Follow Terraform and Alibaba Cloud best practices for security, naming, and structure
-- **Completeness** — Include all required attributes and sensible defaults for optional ones
-- **Readability** — Write clean, well-commented HCL that is easy to understand and maintain
-- **Safety** — Warn about cost implications and destructive operations; never execute Terraform commands directly
+```bash
+# 1. required_providers has aliyun/alicloud with a ~> 1.<minor> version
+awk '
+  /required_providers[[:space:]]*{/ { in_req=1 }
+  in_req && /alicloud[[:space:]]*=[[:space:]]*{/ { in_ali=1 }
+  in_ali && /source[[:space:]]*=[[:space:]]*"aliyun\/alicloud"/ { source=1 }
+  in_ali && /version[[:space:]]*=[[:space:]]*"~>[[:space:]]*1\.[0-9]+"/ { version=1 }
+  in_ali && /^[[:space:]]*}/ { in_ali=0 }
+  END { exit(source && version ? 0 : 1) }
+' <target-dir>/*.tf \
+  && echo OK_VERSION || echo BAD_OR_MISSING_VERSION
 
----
+# 2. configuration_source attribution present somewhere
+grep -Rq 'configuration_source = "AlibabaCloud-Agent-Toolkit/alibabacloud-spec-ops"' \
+  <target-dir>/*.tf \
+  && echo OK_CFG_SOURCE || echo MISSING_CFG_SOURCE
 
-## Common Patterns
-
-### Networking Foundation
-```hcl
-data "alicloud_zones" "default" {
-  available_resource_creation = "VSwitch"
-}
-
-resource "alicloud_vpc" "main" {
-  vpc_name   = "${var.project}-${var.env}-vpc"
-  cidr_block = var.vpc_cidr
-  tags       = local.common_tags
-}
-
-resource "alicloud_vswitch" "main" {
-  count        = length(var.zone_ids)
-  vswitch_name = "${var.project}-${var.env}-vsw-${count.index}"
-  vpc_id       = alicloud_vpc.main.id
-  cidr_block   = cidrsubnet(var.vpc_cidr, 4, count.index)
-  zone_id      = var.zone_ids[count.index]
-  tags         = local.common_tags
-}
-
-resource "alicloud_security_group" "main" {
-  name        = "${var.project}-${var.env}-sg"
-  vpc_id      = alicloud_vpc.main.id
-  description = "Managed by Terraform"
-  tags        = local.common_tags
-}
+# 3. region uses variable, not hardcoded
+grep -Rq 'region\s*=\s*var\.region' <target-dir>/*.tf \
+  && echo OK_REGION_VAR || echo HARDCODED_REGION
 ```
 
-### ECS Instance
-```hcl
-data "alicloud_images" "default" {
-  name_regex  = var.image_regex
-  most_recent = true
-  owners      = "system"
-}
+All three must return OK. If any fails, fix the offending content and
+re-run — do NOT proceed to Step 6 with failures.
 
-resource "alicloud_instance" "main" {
-  count                      = var.instance_count
-  instance_name              = "${var.project}-${var.env}-${var.role}-${count.index + 1}"
-  instance_type              = var.instance_type
-  image_id                   = data.alicloud_images.default.images[0].id
-  vswitch_id                 = alicloud_vswitch.main[count.index % length(alicloud_vswitch.main)].id
-  security_groups            = [alicloud_security_group.main.id]
-  system_disk_category       = "cloud_essd"
-  system_disk_size           = var.system_disk_size
-  internet_max_bandwidth_out = var.public_bandwidth
-  tags                       = merge(local.common_tags, { Role = var.role })
-}
+#### 5.5 Style baseline
+
+- 2-space indent; `=` aligned within a block; snake_case semantic resource labels
+  (`alicloud_vswitch.app_a`, not `vsw1`).
+- Every tag-supporting resource should carry a non-empty `tags` block for ops
+  hygiene — pick reasonable keys for the scenario (common choices:
+  `ManagedBy`, `Project`, `Environment`, `CreatedBy`). Skill does not
+  prescribe specific tag keys or values.
+
+#### 5.6 Deprecated-field audit — static grep pass (MANDATORY)
+
+Run before `terraform` is needed — this is a pure-grep pass on the HCL you
+just wrote. For every resource in this generation, grep the project against
+`references/deprecated-fields.md` and handle each row-kind:
+
+- **rename** row → if the old field name appears in HCL you just wrote,
+  replace it with the new field name. Examples that show up most often:
+    - `alicloud_ram_role`: `name` → `role_name`,
+      `document` → `assume_role_policy_document`
+    - `alicloud_security_group`: `name` → `security_group_name`
+    - `alicloud_db_database`: `name` → `data_base_name`
+- **split / soft-split** row → do NOT write the inline field on the parent.
+  Declare the replacement sub-resource only when the user's requirement
+  needs that capability, or when `references/resource-patterns.md` says the
+  sub-resource has an explicit safe default. Example: for OSS buckets,
+  `alicloud_oss_bucket_acl` defaults to `private`, but logging/CORS/website
+  sub-resources are omitted unless the user asks for those features.
+- **deprecated-no-replacement** row → stop using the field, no substitute.
+
+Applies only to files written in this generation — do NOT refactor
+pre-existing user files you weren't asked to touch.
+
+**Post-audit verification (bash grep — must return all OK)**:
+
+```bash
+# Walk deprecated-fields.md row by row and check whether any deprecated
+# field that applies to a generated resource is still in use.
+# Uses awk to extract individual resource blocks before field matching,
+# so that short field names (name, document) don't falsely match
+# substrings in compound field names (role_name, policy_document).
+grep '| `alicloud_' references/deprecated-fields.md | while IFS='|' read _ resource field kind _; do
+  resource=$(echo "$resource" | tr -d ' `')
+  field=$(echo "$field" | tr -d ' ')
+  kind=$(echo "$kind" | tr -d ' ')
+  # Only check if this resource exists in the generated HCL
+  if grep -Rq "resource \"$resource\"" <target-dir>/*.tf; then
+    case "$kind" in
+      rename|deprecated-no-replacement)
+        awk -v res="$resource" -v fld="$field" '
+          $0 ~ "resource \"" res "\"" { in_block=1; next }
+          in_block && /^}/ { in_block=0 }
+          in_block && $0 ~ "(^|[^_[:alnum:]])" fld "([^_[:alnum:]]|$)" { found=1; exit }
+          END { exit found ? 0 : 1 }
+        ' <target-dir>/*.tf \
+          && echo "DEPRECATED: $resource.$field" || echo "OK: $resource.$field"
+        ;;
+      split|soft-split)
+        grep -q "\b$field\b\s*=" <target-dir>/*.tf \
+          && echo "DEPRECATED: $resource.$field (inline — use standalone sub-resource)" \
+          || echo "OK: $resource.$field (not inline)"
+        ;;
+    esac
+  fi
+done
 ```
 
-### RDS Database
-```hcl
-resource "alicloud_db_instance" "main" {
-  engine               = var.db_engine
-  engine_version       = var.db_engine_version
-  instance_type        = var.db_instance_type
-  instance_storage     = var.db_storage
-  instance_name        = "${var.project}-${var.env}-db"
-  vswitch_id           = alicloud_vswitch.main[0].id
-  security_ips         = [var.vpc_cidr]
-  category             = "HighAvailability"
-  zone_id              = var.zone_ids[0]
-  zone_id_slave_a      = var.zone_ids[1]
-  tags                 = local.common_tags
-}
+**HARD GATE: must pass before Step 6** — If the script above produces
+any `DEPRECATED:` line:
 
-resource "alicloud_db_database" "main" {
-  instance_id = alicloud_db_instance.main.id
-  name        = var.db_name
-  character_set = "utf8mb4"
-}
+1. Read each `DEPRECATED:` line — it names the resource and field.
+2. Look up that resource+field in `references/deprecated-fields.md`
+   to get the **Action** column (rename target, split sub-resource,
+   etc.).
+3. Apply the fix in the HCL.
+4. Re-run the verification script.
+5. Repeat until **every line returns `OK:`**. This is a blocking gate —
+   do NOT proceed to Step 6 with any `DEPRECATED:` output. Do NOT claim
+   "verified" unless the script produces all `OK:`.
 
-resource "alicloud_db_account" "main" {
-  db_instance_id   = alicloud_db_instance.main.id
-  account_name     = var.db_account_name
-  account_password = var.db_account_password
-  account_type     = "Super"
-}
+### Step 6. Validate + provider deprecation detection
+
+If `terraform` is on PATH:
+
+```bash
+(cd <target-dir> \
+  && terraform fmt -recursive \
+  && terraform init -backend=false \
+  && terraform validate -json)
 ```
 
-### SLB Load Balancer
-```hcl
-resource "alicloud_slb_load_balancer" "main" {
-  load_balancer_name = "${var.project}-${var.env}-slb"
-  address_type       = "internet"
-  load_balancer_spec = var.slb_spec
-  vswitch_id         = alicloud_vswitch.main[0].id
-  tags               = local.common_tags
-}
+**Loop until both conditions are met** (max 3 fix attempts total):
 
-resource "alicloud_slb_listener" "http" {
-  load_balancer_id = alicloud_slb_load_balancer.main.id
-  frontend_port    = 80
-  backend_port     = var.app_port
-  protocol         = "http"
-  bandwidth        = -1
-  health_check     = "on"
-  health_check_uri = var.health_check_path
-}
+1. Parse `validate -json`. If there are **errors** → fix the offending
+   file, then go to step 3.
+2. Scan `validate -json` `diagnostics[].summary` for `[DEPRECATED]`
+   strings. The provider emits authoritative deprecation annotations
+   (e.g. `"document": "[DEPRECATED] … New field
+   'assume_role_policy_document' instead."`). If found → fix the
+   matching field, then go to step 3.
+3. Re-run `cd <target-dir> && terraform validate -json` and go back
+   to step 1.
 
-resource "alicloud_slb_server_group" "main" {
-  load_balancer_id = alicloud_slb_load_balancer.main.id
-  name             = "${var.project}-${var.env}-sg"
-}
+Exit the loop only when validate reports **no errors AND no
+`[DEPRECATED]` diagnostics**. After 3 attempts without reaching this
+state: proceed to Step 7 with `Validation: FAILED (<diagnostic excerpt>)`
+and include the failing HCL verbatim in the optional notes.
 
-resource "alicloud_slb_server_group_server_attachment" "main" {
-  count           = var.instance_count
-  server_group_id = alicloud_slb_server_group.main.id
-  server_id       = alicloud_instance.main[count.index].id
-  port            = var.app_port
-}
+**If `init` fails with a network error** (cannot reach `registry.terraform.io`):
+not a config bug. Point the user at the mirror-source configuration in
+`references/auth-and-network.md`, then proceed to Step 7 — the Summary
+MUST use `Validation: SKIPPED (init failed — network/unreachable)`.
+Do not retry blindly, do not write `~/.terraformrc` yourself.
+
+If `terraform` is absent: SKIP this step and surface that fact in Step 7's
+summary (Hard rule §2) with `Validation: SKIPPED (terraform binary not on PATH)`.
+
+### Step 7. Coverage check + summarize
+
+**MANDATORY — runs regardless of generation outcome.** Even if earlier
+steps were interrupted (init network failure, validate loop exhausted,
+terraform not on PATH), this step MUST execute. The `Files written:`
+and `Validation:` lines are the final contract with downstream
+evaluators — skipping them is a hard failure.
+
+**Coverage check.** Enumerate resource blocks in the generated HCL and compare
+with Step 3's sketch. If any sketch row is missing, return to Step 5 and add it
+— do not skip a row because "the user didn't explicitly name it".
+
+**Summary template** — print in the user's language, using **exactly this
+structure** (fill `<bracketed>` placeholders, keep the two line labels
+`Files written:` and `Validation:` verbatim):
+
+```
+Files written:
+<path/to/file1>
+<path/to/file2>
+...
+
+Validation: <one-of-four-exact-strings-below>
+
+Deprecation routing: <If re-routed: `<original_name>` → `<new_name>`; else: None>
+
+<optional: architecture notes, design decisions, deploy hints — free-form
+here is fine, but NOT inside the lines above>
 ```
 
-### OSS Bucket
-```hcl
-resource "alicloud_oss_bucket" "main" {
-  bucket = "${var.project}-${var.env}-${var.bucket_purpose}"
-  acl    = "private"
+The `Validation:` line must be **one of these exact strings**, chosen from
+what actually happened in Step 6. Do NOT paraphrase or fold it into prose:
 
-  server_side_encryption_rule {
-    sse_algorithm = "KMS"
-  }
+- `Validation: terraform fmt+validate: ok`
+- `Validation: SKIPPED (terraform binary not on PATH)`
+- `Validation: SKIPPED (<reason>)`
+- `Validation: FAILED (<diagnostic excerpt>)` — after 3 retries hit the cap
 
-  versioning {
-    status = "Enabled"
-  }
+Edge cases:
+- Init timeout → `Validation: FAILED (init timed out — provider installation exceeded time limit)`
+- Init network-unreachable → `Validation: SKIPPED (init failed — network/unreachable)`
+- Init failed after fmt succeeded → use the root-cause string above, not a
+  hybrid status.
 
-  lifecycle_rule {
-    enabled = true
-    prefix  = "logs/"
-    expiration {
-      days = 90
-    }
-  }
+### Step 8 (optional). `terraform plan`
 
-  tags = local.common_tags
-}
+Only when the user asks. Pre-flight probes **all seven** credential paths
+from `references/auth-and-network.md` without reading any value:
+
+```bash
+(
+  [[ -n "${ALIBABA_CLOUD_ACCESS_KEY_ID:-}" ]] && [[ -n "${ALIBABA_CLOUD_ACCESS_KEY_SECRET:-}" ]] && echo "ready:env-ak-sk"
+  [[ -f "$HOME/.aliyun/config.json" ]]                                                           && echo "ready:shared-config"
+  { [[ -n "${ALIBABA_CLOUD_CREDENTIALS_FILE:-}" ]] && [[ -f "${ALIBABA_CLOUD_CREDENTIALS_FILE}" ]]; } && echo "ready:custom-credentials-file"
+  [[ -n "${ALIBABA_CLOUD_ECS_METADATA:-}" ]]                                                      && echo "ready:ecs-ram-role"
+  [[ -n "${ALIBABA_CLOUD_ROLE_ARN:-}" ]]                                                          && echo "ready:assume-role"
+  [[ -n "${ALIBABA_CLOUD_CREDENTIALS_URI:-}" ]]                                                   && echo "ready:sidecar"
+) | head -1
 ```
 
-### NAT Gateway (Internet Access for Private Subnets)
-```hcl
-resource "alicloud_nat_gateway" "main" {
-  vpc_id           = alicloud_vpc.main.id
-  nat_gateway_name = "${var.project}-${var.env}-nat"
-  payment_type     = "PayAsYouGo"
-  vswitch_id       = alicloud_vswitch.main[0].id
-  nat_type         = "Enhanced"
-  tags             = local.common_tags
-}
+- **Any line of output** → a credential path is available:
+  `(cd <target-dir> && terraform init && terraform plan -out=tfplan)`;
+  surface the output.
+- **Empty output** → `NO_CREDENTIALS`. Tell the user about **all** viable
+  paths (env AK/SK, shared `~/.aliyun/config.json` + `ALIBABA_CLOUD_PROFILE`,
+  ECS instance RAM role, Assume Role chain, OIDC/RRSA, sidecar URI) — do
+  NOT just push env AK/SK. Point them at `references/auth-and-network.md`
+  for the full setup. Then stop. Never read or print secret values.
 
-resource "alicloud_eip_address" "nat" {
-  address_name = "${var.project}-${var.env}-nat-eip"
-  payment_type = "PayAsYouGo"
-  bandwidth    = "20"
-  tags         = local.common_tags
-}
+## References
 
-resource "alicloud_eip_association" "nat" {
-  allocation_id = alicloud_eip_address.nat.id
-  instance_id   = alicloud_nat_gateway.main.id
-  instance_type = "Nat"
-}
+| Source | When to read |
+| --- | --- |
+| `references/alicloud-providers.md` (local) | Step 4.1 — resource existence, deprecation mark, doc URL |
+| Provider doc (WebFetch of the URL from 4.1) | Step 4.2 — authoritative Required / Optional per resource |
+| `references/deprecated-fields.md` (local) | Step 5.1 — known field-level renames not flagged by `terraform validate` |
+| `references/resource-patterns.md` (local) | Step 5.1 — product-specific idioms not emphasized by the provider doc (RDS HA, …) |
+| `references/auth-and-network.md` (local) | Step 6 failure branch — mirror-source config; Step 8 pre-flight — full credential chain |
 
-resource "alicloud_snat_entry" "main" {
-  snat_table_id     = alicloud_nat_gateway.main.snat_table_ids
-  source_vswitch_id = alicloud_vswitch.main[0].id
-  snat_ip           = alicloud_eip_address.nat.ip_address
-}
-```
-
-## Locals Template
-
-```hcl
-locals {
-  common_tags = {
-    Project     = var.project
-    Environment = var.env
-    ManagedBy   = "terraform"
-    CreatedBy   = "alibabacloud-spec-ops"
-  }
-}
-```
-
-## Variables Template
-
-**RULE: Every variable MUST have a `default` value.** This ensures the code can be deployed directly without requiring any manual input. No exceptions.
-
-```hcl
-variable "project" {
-  description = "Project name for resource naming"
-  type        = string
-  default     = "myproject"
-}
-
-variable "env" {
-  description = "Environment (production, staging, development)"
-  type        = string
-  default     = "production"
-}
-
-variable "region" {
-  description = "Alibaba Cloud region"
-  type        = string
-  default     = "cn-hangzhou"
-}
-
-variable "zone_ids" {
-  description = "Availability zone IDs"
-  type        = list(string)
-  default     = ["cn-hangzhou-h", "cn-hangzhou-i"]
-}
-
-variable "vpc_cidr" {
-  description = "VPC CIDR block"
-  type        = string
-  default     = "10.0.0.0/16"
-}
-```
-
-**Forbidden:**
-```hcl
-# ❌ WRONG — no default, will block deployment
-variable "project" {
-  type = string
-}
-```
+The local catalog is one markdown table row per `alicloud_*` resource and
+data source, with a `[doc](<url>)` cell and, for deprecated entries, a
+`⚠️ 弃用 → `<new_name>`` marker. It is generated from the upstream provider
+repo by `scripts/build_alicloud_providers.py`; re-run that script when a new
+`aliyun/alicloud` release introduces or shifts deprecations.
