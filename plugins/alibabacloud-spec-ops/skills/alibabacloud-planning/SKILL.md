@@ -4,7 +4,7 @@ description: "Act as an Alibaba Cloud expert to help users clarify requirements,
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.3.1"
+  version: "0.4.0"
 ---
 
 # Alibaba Cloud Planning
@@ -43,6 +43,7 @@ Activate this skill when user wants to:
 5. **Four-pillar evaluation** — In Full Mode, per-pillar deep-dive; in Fast Track, 4 quick questions + multi-plan comparison
 6. **Iterative & bounded** — One question at a time; Fast Track: 2-3 questions; Full Mode: 6-8 questions max
 7. **Create state directory** — Write design artifacts to `.aliyun-ai-ops-spec/{name}/`
+8. **Day-2 — design first, then dialogue** — When entering modification flow, you MUST read and fully internalize the existing `designs/design.md` BEFORE asking the user a single question about the change. All clarification, brainstorming, and four-pillar exploration in a Day-2 session MUST be framed as deltas against the documented design — never start the conversation from a blank slate when prior design exists.
 
 ---
 
@@ -129,20 +130,35 @@ If **no project** exists but user said "修改" → clarify:
 
 #### Step 4: Load Existing Context
 
-Once user confirms which project to modify, load the full context:
+> **HARD GATE — design.md FIRST.** Once user confirms which project to
+> modify, the very first action MUST be reading the existing design
+> document. Do NOT ask the user about the change, do NOT scan other
+> files first, do NOT enter Phase 1 — until `design.md` is loaded into
+> your context AND you have internalized it (Step 4.5).
+
+**Step 4a: Read design.md (MANDATORY, blocking)**
 
 ```
-# Read existing design
 Read: .aliyun-ai-ops-spec/{name}/designs/design.md
+```
 
-# Read current Terraform code
+If the file does not exist or is empty, STOP and tell the user:
+"该项目缺失 `designs/design.md`，无法在原有设计上做 Day-2 变更。需要补建设
+计文档，还是按新建项目处理？" Do not proceed without a resolved answer.
+
+**Step 4b: Read supporting context**
+
+After `design.md` is loaded, read the rest:
+
+```
+# Current Terraform code — the source of truth for what was actually written
 Glob: .aliyun-ai-ops-spec/{name}/designs/terraform/*.tf
 Read: (each .tf file)
 
-# Read execution history (if exists)
-Read: .aliyun-ai-ops-spec/{name}/tasks/tf-apply-result.md
+# Execution history — what was actually deployed and any failures
+Read: .aliyun-ai-ops-spec/{name}/tasks/tf-apply-result.md (if exists)
 
-# Read current status — also captures the remote state handle
+# Current status — pipeline stage + remote state handle
 Read: .aliyun-ai-ops-spec/{name}/tasks/status.json
 ```
 
@@ -155,23 +171,55 @@ flag the legacy edge case to the user (see
 [`executing-plans/references/iac-service-api.md` → State Persistence](../../alibabacloud-executing-plans/references/iac-service-api.md))
 so the migration question gets resolved before any new code is generated.
 
-**After loading, summarize to user:**
+#### Step 4.5: Internalize Existing Design (MANDATORY before Phase 1)
 
-> "已加载项目 `{name}` 的当前状态：
+This is a comprehension contract, not a file-reading step. Before you ask
+the user anything about the change, extract and hold the following from
+`design.md` (cross-checked against the actual `.tf` files in Step 4b):
+
+| Dimension | What to extract |
+| --- | --- |
+| **Intent** | What problem was the original design solving? What was the workload profile? |
+| **Architecture topology** | VPC / vswitch layout, AZ strategy, public/private boundaries, the actual `alicloud_*` resources that exist |
+| **Security posture** | Authn, network exposure, key management, RAM policies, encryption choices — and the rationale recorded |
+| **Stability posture** | HA design (single-AZ / multi-AZ), backups, failover, replication, scaling — and the recorded trade-offs |
+| **Cost posture** | Pay-as-you-go vs subscription, instance specs, estimated monthly figure, what was deferred for cost |
+| **Efficiency posture** | Instance families chosen, auto-scaling, caching, performance margins, observability |
+| **Open items / known limits** | "Decisions Log" entries marked as deferred, conditional, or revisit-later |
+
+If `design.md` is missing any of these dimensions, note the gap explicitly
+— do not invent. Treat the gaps as risks to surface in the dialog.
+
+**After internalization, summarize to user — prove comprehension, do not
+just list resources:**
+
+> "已加载项目 `{name}` 并阅读了原始设计。简要回顾：
 >
-> **现有资源：**
-> - ECS: ecs.c6.large (2C4G) × 2
-> - RDS: MySQL 8.0, mysql.n2.small.2c (1C2G)
+> **原设计意图：** {one sentence on what problem this infra was solving and the workload profile}
+>
+> **当前架构：**
+> - ECS: ecs.c6.large (2C4G) × 2  ({rationale from design.md, e.g. "面向中等并发 Web 服务"})
+> - RDS: MySQL 8.0, mysql.n2.small.2c (1C2G)  ({rationale, e.g. "单实例，未启用主备 — 设计中标记为 stability 风险点"})
 > - SLB: 公网, 按量付费
-> - VPC + 2 VSwitch (cn-hangzhou-h, cn-hangzhou-i)
+> - VPC + 2 VSwitch (cn-hangzhou-h, cn-hangzhou-i)  ({rationale, e.g. "为跨 AZ 预留，但当前仅 ECS 跨 AZ"})
+>
+> **四支柱当前态：**
+> - 安全：{summary from design.md}
+> - 稳定：{summary, including known gaps}
+> - 成本：约 ¥{X}/月（{breakdown}）
+> - 效率：{summary}
+>
+> **设计中遗留事项：** {bulleted list of deferred items from Decisions Log, or "无"}
 >
 > **远程状态：** 沿用已有部署 (`state_id: {state.state_id}`)，本次变更会在该状态上做 plan/apply，不会重复创建资源。
 >
-> **你想进行什么变更？**"
+> 在这个基础上，你这次想做什么变更？"
+
+Only after presenting this summary may you proceed to Phase 1 clarification.
 
 When `state.state_id` is absent (e.g. project only reached `validated` and
 never executed), omit the "远程状态" line — there is nothing to continue
-on.
+on. The design-comprehension portion above is still mandatory.
 
 #### Step 5: Enter Normal Flow with Context
 
@@ -179,9 +227,10 @@ After understanding the change request, proceed to **Phase 1 (Clarify)** with th
 
 | Aspect | New Build | Modification |
 |--------|-----------|--------------|
-| Clarification focus | Full scope from zero | Delta only — what changes, what stays |
+| Clarification focus | Full scope from zero | Delta only — what changes, what stays. Every question MUST reference the existing design (e.g. "现有 RDS 是单实例无主备，扩容要不要顺带启用主备？"), never ask as if there were no prior design |
+| Four-pillar exploration | Cover all four pillars from zero | Delta on each pillar — does the change affect security posture? stability? cost ceiling? efficiency? Anchor each pillar on what Step 4.5 captured |
 | Mode decision context | Assess total complexity | Assess **change** complexity (small change → Fast Track) |
-| Design output | New design.md | **Updated** design.md (preserve existing, add/modify sections) |
+| Design output | New design.md | **Updated** design.md (preserve existing, add/modify sections; append to Decisions Log) |
 | Terraform output | New .tf files | **Modified** .tf files (add resources, change specs) |
 | Status tracking | Start from "designed" | Update existing status, set `"change_type": "modify"`, **preserve `state.state_id`** so executing-plans iterates on the same remote state |
 
