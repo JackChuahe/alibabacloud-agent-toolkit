@@ -7,9 +7,9 @@ metadata:
   version: "0.1.0"
 compatibility:
   tools:
-    - mcp__alibabacloud__AlibabaCloud___CallCLI
-    - mcp__alibabacloud__AlibabaCloud___SearchDocument
-    - mcp__alibabacloud__AlibabaCloud___ReadDocument
+    - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___CallCLI
+    - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___SearchDocument
+    - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___ReadDocument
 ---
 
 # Alibaba Cloud Terraform Code Generator

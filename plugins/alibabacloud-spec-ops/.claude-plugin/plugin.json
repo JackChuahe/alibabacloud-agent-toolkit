@@ -2,7 +2,7 @@
   "author": {
     "name": "Alibaba Cloud"
   },
-"description": "Alibaba Cloud AI Ops Plugin - Infrastructure operations workflow with intelligent planning, validation, and execution powered by MCP tooling",
+  "description": "Alibaba Cloud AI Ops Plugin - Infrastructure operations workflow with intelligent planning, validation, and execution powered by MCP tooling.",
   "homepage": "https://github.com/acloudlabs-unofficial/alibabacloud-agent-toolkit",
   "keywords": [
     "alibabacloud",
