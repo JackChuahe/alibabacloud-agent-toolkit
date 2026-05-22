@@ -13,7 +13,7 @@ description: |
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.3.0"
+  version: "0.3.1"
 compatibility:
   tools:
     - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___CallCLI
@@ -465,15 +465,19 @@ Edge cases:
 - MCP CallCLI times out → `Validation: SKIPPED (iacservice validate-module unavailable — timeout)`
 - IaCService returns 5xx → `Validation: FAILED (iacservice 5xx: <message>)`
 
-### Step 8. Execution handoff (NO local `terraform plan` / `apply`)
+### Step 8 (internal). Where execution belongs — DO NOT narrate to user
 
-This skill ends at validation. It does NOT run `terraform plan` or
-`terraform apply` — neither locally nor remotely.
+> **This step is guidance for the model, not a user-facing message.**
+> The skill's user-facing output ends with the Step 7 summary
+> (`Files written: …` + `Validation: …`). Do NOT add an extra
+> paragraph saying you are "returning to the upstream caller",
+> "handing off to {next skill}", "control flow", etc. — that leaks
+> internal orchestration and confuses the user.
 
-In the **alibabacloud-spec-ops workflow**, execution is owned by the
-[`alibabacloud-executing-plans`](../alibabacloud-executing-plans/SKILL.md)
-skill, which runs the generated module through Alibaba Cloud IaC Service
-(remote, MCP-driven). The typical chain is:
+This skill does NOT run `terraform plan` or `terraform apply` —
+neither locally nor remotely. Execution belongs to a separate skill.
+
+For the model's internal awareness only, the spec-ops chain is:
 
 ```
 alibabacloud-planning
@@ -483,16 +487,29 @@ alibabacloud-planning
         → alibabacloud-executing-plans (plan/apply via IaC Service)
 ```
 
-After Step 7 emits a clean `Validation: iacservice validate-module: ok`,
-hand the user back to the upstream caller (usually
-`alibabacloud-writing-plans` or `alibabacloud-validate`) — never invoke
-`terraform plan` here.
+After Step 7 emits the summary, simply stop. Whoever invoked this
+skill — the upstream `writing-plans` skill in the normal flow, or the
+user directly in standalone use — will see the Step 7 summary as the
+return value and decide the next action. The user's next interaction
+will be driven by that caller, not by this skill.
 
-If the user is calling this skill standalone (outside the spec-ops
-workflow) and asks for a plan preview, point them at
-`alibabacloud-executing-plans` rather than running terraform locally.
-Credential handling is owned by that skill — never read or print AK/SK
-values from this skill (Hard rule §1).
+**Standalone use:** if the user invoked this skill directly and now
+asks how to actually deploy, name the deployment skill in plain
+language — for example: "生成完成。要把这些资源真正创建到云上，可以通过
+`alibabacloud-spec-ops:alibabacloud-executing-plans` 远程执行 plan
+和 apply。要现在进入这一步吗？" Never read or print AK/SK values from
+this skill (Hard rule §1).
+
+**FORBIDDEN user-facing phrases** (do not emit any of these, in any
+language):
+
+- "Returning to upstream caller"
+- "Returning control to {skill}"
+- "Handing off to {skill}"
+- "Handoff complete"
+- "Control returns to …"
+- Any sentence whose subject is the skill orchestrator rather than
+  the user or the work product
 
 ## IaCService API Reference (via MCP)
 
