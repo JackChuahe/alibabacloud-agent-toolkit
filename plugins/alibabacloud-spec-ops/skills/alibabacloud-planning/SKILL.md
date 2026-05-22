@@ -4,7 +4,7 @@ description: "Act as an Alibaba Cloud expert to help users clarify requirements,
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # Alibaba Cloud Planning
@@ -746,15 +746,36 @@ After design is complete, automatically perform a quick four-pillar review:
 
 ### Phase 4: Architecture Visualization (Optional, FULL MODE ONLY)
 
-After the design is complete and reviewed, offer a lightweight visual confirmation:
+After the design is complete and reviewed, offer the user a clear,
+explicit choice on whether to generate a visual architecture page.
 
-> "设计方案已完成。我可以额外生成一个简洁的架构可视化 HTML 页面，方便你在浏览器中直观确认资源拓扑。
->
-> ⚠️ 这是可选步骤，会消耗额外的 token。如果你对文字方案已经清楚，可以跳过直接进入代码生成。
->
-> 需要生成可视化页面吗？"
+#### Step 4.1: Ask the User (explicit consent, 3 options)
 
-If user agrees, generate a **single-file HTML** architecture diagram with these constraints:
+Use the `AskUserQuestion` tool — do NOT just ask in plain prose. The
+three options must be presented as distinct, mutually exclusive choices
+so the downstream behavior is unambiguous:
+
+```
+AskUserQuestion:
+  question: "需要为这套架构生成可视化预览吗？"
+  header: "可视化"
+  multiSelect: false
+  options:
+    - label: "生成并自动打开浏览器 (推荐)"
+      description: "生成单文件 HTML 架构图，启动本地临时 webserver，自动在你的默认浏览器中打开预览。会消耗少量额外 token。"
+    - label: "仅生成 HTML 文件"
+      description: "生成 HTML 文件保存到设计目录，不启动 webserver、不打开浏览器。适合远程/无桌面环境，事后自己用浏览器打开。"
+    - label: "跳过"
+      description: "对文字方案已经清楚，直接进入代码生成阶段。节省 token。"
+```
+
+- **"跳过"** → skip Phase 4 entirely; proceed to Phase 5
+- **"仅生成 HTML 文件"** → run Step 4.2 only; tell user the saved path; skip Step 4.3
+- **"生成并自动打开浏览器"** → run Step 4.2 then Step 4.3
+
+#### Step 4.2: Generate HTML
+
+Generate a **single-file HTML** architecture diagram with these constraints:
 
 #### Design Principles
 
@@ -821,11 +842,77 @@ The HTML should show:
 - **DO NOT** use canvas, SVG complex paths, or any charting library
 - Keep HTML structure flat and readable — someone should understand the architecture by reading the source
 - File size target: under 5KB
-- Open directly in browser — no server required
 
 Save to: `.aliyun-ai-ops-spec/{name}/designs/architecture.html`
 
-Use Playwright `browser_navigate` to open the file for the user if they want to preview it in-session.
+If the user picked **"仅生成 HTML 文件"**, print the saved path and stop:
+
+> "架构图已生成：`.aliyun-ai-ops-spec/{name}/designs/architecture.html` — 可以稍后直接用浏览器打开。"
+
+#### Step 4.3: Serve & open the preview (reliable handoff)
+
+> **CRITICAL — Reliability rules:**
+> - **NEVER** use Playwright (`browser_navigate`) here. Playwright opens
+>   a headless/agent-controlled browser the user can't see. Use a real
+>   local webserver and the user's own browser.
+> - **NEVER** rely on `file://` URLs — relative asset paths and some
+>   browsers' file:// restrictions cause silent failures.
+> - **ALWAYS** print the URL even after attempting auto-open, so the
+>   user can copy/paste if auto-open fails.
+
+Pick a random high port, start a tiny Python webserver in the design
+directory, and best-effort open the user's default browser. The whole
+thing is one Bash call:
+
+```bash
+DESIGN_DIR=".aliyun-ai-ops-spec/{name}/designs"
+
+# Random high port to avoid collisions
+PORT=$(python3 -c "import socket;s=socket.socket();s.bind(('',0));print(s.getsockname()[1]);s.close()")
+
+# Start background server, capture PID for cleanup
+LOG="${DESIGN_DIR}/.preview-server.log"
+PID_FILE="${DESIGN_DIR}/.preview-server.pid"
+( cd "${DESIGN_DIR}" && nohup python3 -m http.server "${PORT}" --bind 127.0.0.1 > "${LOG}" 2>&1 & echo $! > "${PID_FILE}" )
+disown $(cat "${PID_FILE}") 2>/dev/null || true
+
+URL="http://127.0.0.1:${PORT}/architecture.html"
+
+# Best-effort auto-open in the user's default browser
+case "$(uname -s)" in
+  Darwin)               open "${URL}" 2>/dev/null || true ;;
+  Linux)                xdg-open "${URL}" 2>/dev/null || true ;;
+  MINGW*|MSYS*|CYGWIN*) start "" "${URL}" 2>/dev/null || true ;;
+esac
+
+echo "URL=${URL}"
+echo "PID=$(cat "${PID_FILE}")"
+```
+
+Run this via the Bash tool, **not** `run_in_background: true` —
+`nohup` + `disown` already detach the server, and you want the URL/PID
+to come back in this turn.
+
+After the call returns, tell the user explicitly:
+
+> "已生成架构图并启动本地预览：
+>
+> 🌐 **{URL}**
+>
+> 已尝试在你的默认浏览器中自动打开。如果没有自动弹出，请手动复制上面的链接到浏览器查看。
+>
+> 服务器在后台运行，会话结束后可执行 `kill $(cat {PID_FILE})` 手动停止，或忽略它（占用极小）。"
+
+**Failure fallbacks** (in priority order — never silently fail the step):
+
+1. If `python3` is not available, fall back to "仅生成 HTML 文件" behavior:
+   tell the user the file path and recommend opening manually.
+2. If the server starts but the auto-open command isn't available
+   (e.g. headless Linux without `xdg-open`), still print the URL —
+   the user copies it manually.
+3. If the user is in a remote/containerized environment where
+   `127.0.0.1` isn't reachable from their browser, suggest re-running
+   with `--bind 0.0.0.0` and using the host's external IP.
 
 ### Phase 5: Confirm & Persist
 
