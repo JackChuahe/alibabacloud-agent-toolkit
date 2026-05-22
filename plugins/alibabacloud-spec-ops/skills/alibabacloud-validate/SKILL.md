@@ -134,10 +134,18 @@ Read all `.tf` files from `designs/terraform/` and concatenate them, then call:
 
 ```
 AlibabaCloud___CallCLI:
-  command: "aliyun iacservice validate-module --template-body '<concatenated-tf-content>'"
+  command: "aliyun iacservice validate-module --client-token <uuid> --source Upload --code '<concatenated-tf-content>'"
 ```
 
-**Note:** The `--template-body` accepts the raw HCL content as a string. Concatenate all `.tf` files into a single body for validation.
+**Note:** Pass the raw HCL content via `--code` (single file) or `--code-map '{<file>: <hcl>, ...}'` (multi-file, recommended when the design has more than one `.tf`). Required params:
+
+| Param | Notes |
+| --- | --- |
+| `--client-token` | UUID, format `[0-9a-zA-Z-]{1,64}` — fresh per call |
+| `--source` | must be `Upload` for inline text |
+| `--code` / `--code-map` | mutually exclusive |
+
+Do NOT pass `--template-body` or `--region` — those are stale parameter names.
 
 **Expected output:**
 - ✅ `"Valid": true` → Validation passed

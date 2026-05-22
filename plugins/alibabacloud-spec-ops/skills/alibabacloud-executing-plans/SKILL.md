@@ -4,7 +4,7 @@ description: "Execute validated Terraform plans via Alibaba Cloud IaC Service. R
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # Alibaba Cloud Executing Plans
@@ -44,7 +44,7 @@ Activate when:
 1. **User confirmation required** — Never execute without explicit user approval
 2. **Plan before apply** — Always run terraform plan first, show results, get confirmation
 3. **MCP only** — ALL `aliyun` CLI commands MUST go through `AlibabaCloud___CallCLI`, never through Bash
-4. **Inline content** — Read .tf files locally, then pass content as string to `--template-body` (MCP cannot access local files)
+4. **Inline content** — Read .tf files locally, then pass content as string to `--code` (MCP cannot access local files)
 5. **Record everything** — All outputs recorded to tasks/
 6. **Support rollback** — Provide destroy option if apply fails
 7. **Poll for completion** — IaC Service is async; use sequential MCP calls to poll
@@ -61,8 +61,9 @@ Activate when:
 
 **Therefore, you MUST:**
 1. Use the `Read` tool to read `.tf` file contents into your context
-2. Pass the file content as an inline string in the `--template-body` parameter
+2. Concatenate all `.tf` files into a single string and pass it inline via `--code`
 3. Escape single quotes in HCL content (replace `'` with `'\''` if needed)
+4. Generate a fresh UUID for `--client-token` on every Plan / Apply / Destroy call (idempotency key, format `[0-9a-zA-Z-]{1,64}`)
 
 ---
 
@@ -92,7 +93,7 @@ Read: .aliyun-ai-ops-spec/{name}/designs/terraform/outputs.tf
 # ... any other .tf files
 ```
 
-Concatenate all content into one `TEMPLATE_BODY` string. This will be passed inline to MCP commands.
+Concatenate all content into one `CODE` string. This will be passed inline via `--code` to MCP commands.
 
 ### Step 3: Execute Terraform Plan
 
@@ -100,20 +101,20 @@ Concatenate all content into one `TEMPLATE_BODY` string. This will be passed inl
 
 ```
 AlibabaCloud___CallCLI:
-  command: "aliyun iacservice execute-terraform-plan --template-body '{TEMPLATE_BODY}' --region {REGION}"
+  command: "aliyun iacservice execute-terraform-plan --code '{CODE}' --client-token {CLIENT_TOKEN}"
 ```
 
 Where:
-- `{TEMPLATE_BODY}` = concatenated .tf content (with single quotes properly escaped)
-- `{REGION}` = region from the design (e.g., `cn-hangzhou`)
+- `{CODE}` = concatenated .tf content (single quotes properly escaped)
+- `{CLIENT_TOKEN}` = fresh UUID (format `[0-9a-zA-Z-]{1,64}`) — required for idempotency
 
-**Response contains `ExecutionId`** — save this for subsequent calls.
+**Response contains a state file ID (typically `StateId`)** — save it as `{STATE_ID}` for subsequent calls.
 
 **Poll for completion** (see Polling Strategy below):
 
 ```
 AlibabaCloud___CallCLI:
-  command: "aliyun iacservice get-execute-state --execution-id {ExecutionId} --region {REGION}"
+  command: "aliyun iacservice get-execute-state --state-id {STATE_ID}"
 ```
 
 ### Step 4: Present Plan Results
@@ -141,18 +142,21 @@ Ask for explicit confirmation:
 
 ### Step 5: Execute Terraform Apply
 
-Only after user confirms:
+Only after user confirms. Reuse `{STATE_ID}` from Step 3's plan and use a **fresh** `--client-token` (different UUID):
 
 ```
 AlibabaCloud___CallCLI:
-  command: "aliyun iacservice execute-terraform-apply --execution-id {ExecutionId} --region {REGION}"
+  command: "aliyun iacservice execute-terraform-apply --state-id {STATE_ID} --client-token {CLIENT_TOKEN}"
 ```
+
+If the HCL changed after plan, also pass `--code '{CODE}'` (mutually included with `--state-id`).
+The apply response returns the same `{STATE_ID}` (re-confirm before polling).
 
 **Poll for completion:**
 
 ```
 AlibabaCloud___CallCLI:
-  command: "aliyun iacservice get-execute-state --execution-id {ExecutionId} --region {REGION}"
+  command: "aliyun iacservice get-execute-state --state-id {STATE_ID}"
 ```
 
 ### Step 6: Record Results
@@ -165,8 +169,8 @@ Write results to `tasks/tf-apply-result.md`:
 ## Timestamp
 {ISO timestamp}
 
-## Execution ID
-{execution-id}
+## State ID
+{state-id}
 
 ## Status
 SUCCESS / FAILED
@@ -200,7 +204,7 @@ IaC Service operations are **asynchronous**. After submitting a job, poll using 
 | First poll delay | Wait ~5 seconds (inform user "正在执行中...") then call |
 | Poll interval | Every 10 seconds, call `get-execute-state` again |
 | Max attempts | 60 attempts (≈10 minutes) |
-| Timeout action | Report "still running" with ExecutionId for manual check |
+| Timeout action | Report "still running" with `{STATE_ID}` for manual check |
 
 **How to poll:**
 
@@ -237,7 +241,7 @@ IaC Service operations are **asynchronous**. After submitting a job, poll using 
 
 ```
 AlibabaCloud___CallCLI:
-  command: "aliyun iacservice get-execute-state --execution-id {ExecutionId} --region {REGION}"
+  command: "aliyun iacservice get-execute-state --state-id {STATE_ID}"
 ```
 
 - Offer options:
@@ -256,11 +260,11 @@ For `terraform destroy` (cleanup or rollback):
 >
 > Type the requirement name `{name}` to confirm destruction:"
 
-Require exact name match before proceeding. Then execute:
+Require exact name match before proceeding. Then execute (use a fresh `--client-token`):
 
 ```
 AlibabaCloud___CallCLI:
-  command: "aliyun iacservice execute-terraform-destroy --execution-id {ExecutionId} --region {REGION}"
+  command: "aliyun iacservice execute-terraform-destroy --state-id {STATE_ID} --client-token {CLIENT_TOKEN}"
 ```
 
 Poll for completion using same strategy as apply.
@@ -273,17 +277,49 @@ Poll for completion using same strategy as apply.
 
 | Operation | MCP Command |
 |-----------|-------------|
-| Validate | `aliyun iacservice validate-module --template-body '{content}' --region {region}` |
-| Plan | `aliyun iacservice execute-terraform-plan --template-body '{content}' --region {region}` |
-| Apply | `aliyun iacservice execute-terraform-apply --execution-id {id} --region {region}` |
-| Destroy | `aliyun iacservice execute-terraform-destroy --execution-id {id} --region {region}` |
-| Poll status | `aliyun iacservice get-execute-state --execution-id {id} --region {region}` |
+| Plan        | `aliyun iacservice execute-terraform-plan --code '{content}' --client-token {uuid}` |
+| Apply       | `aliyun iacservice execute-terraform-apply --state-id {id} --client-token {uuid}` |
+| Poll status | `aliyun iacservice get-execute-state --state-id {id}` |
+| Destroy     | `aliyun iacservice execute-terraform-destroy --state-id {id} --client-token {uuid}` |
+
+### Command Parameter Reference
+
+**`aliyun iacservice execute-terraform-plan`**
+
+| Param | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `--client-token` | yes | string `[0-9a-zA-Z-]{1,64}` | Idempotency key, fresh UUID per call |
+| `--code` | conditional | string | Full Terraform HCL content (concatenated from all `.tf` files). Required for first plan; on a follow-up plan with unchanged content you may pass only `--state-id` |
+| `--state-id` | conditional | string | When non-empty, continue Plan on top of an existing state file |
+
+**`aliyun iacservice execute-terraform-apply`**
+
+| Param | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `--client-token` | yes | string `[0-9a-zA-Z-]{1,64}` | Idempotency key, fresh UUID per call |
+| `--code` | conditional | string | Required only if HCL changed since plan; pass the new concatenated content |
+| `--state-id` | conditional | string | State ID from the preceding plan; pass it when content is unchanged so Apply continues on the same state |
+
+**`aliyun iacservice execute-terraform-destroy`**
+
+| Param | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `--client-token` | yes | string `[0-9a-zA-Z-]{1,64}` | Idempotency key, fresh UUID per call |
+| `--state-id` | yes | string | State ID of the deployment to tear down |
+
+**`aliyun iacservice get-execute-state`**
+
+| Param | Required | Type | Notes |
+| --- | --- | --- | --- |
+| `--state-id` | yes | string | State ID returned by the preceding Plan / Apply / Destroy call |
 
 **⚠️ NEVER:**
 - Use `file://` paths (MCP cannot access local filesystem)
 - Use `$(cat ...)` shell substitution (MCP doesn't support shell operators)
 - Use Bash tool to run `aliyun` commands (always use MCP)
-- Omit `--region` parameter
+- Pass `--region` — IaC Service derives the region from the HCL `provider "alicloud"` block; the CLI does not accept a `--region` flag here
+- Omit `--client-token` from Plan / Apply / Destroy — it is required for idempotency
+- Use `--execution-id` or `--template-body` — these are stale names from earlier drafts; the correct parameters are `--state-id` and `--code`
 
 ---
 
