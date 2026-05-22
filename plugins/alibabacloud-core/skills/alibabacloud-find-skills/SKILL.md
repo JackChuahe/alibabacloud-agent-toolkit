@@ -7,6 +7,7 @@ description: >
   "帮我找一个 skill", "browse alicloud skills", "list alicloud skill categories",
   "is there an alicloud skill that can...", "what alicloud skills are available", "XX Skill 的内容是什么", "我想了解阿里云 XX Skill 具体做什么","帮我安装阿里云 Skill","使用阿里云相关的skill",
   "阿里云 agent skill 市场", "搜一下阿里云的 skill".
+allowed-tools: "mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___SearchApis,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___GetApiDefinition,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___GenerateCLICommand,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___ListApis,mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___ListProducts"
 ---
 
 > [!IMPORTANT]
@@ -38,6 +39,21 @@ This skill enables users to:
 - "阿里云有哪些 OSS 相关的 skill?"
 - "Browse all available alicloud skills"
 - "Install a skill for RDS management"
+
+## Execution Path: MCP CallCLI First
+
+> **[MUST] Every `aliyun agentexplorer ...` (and any other API-hitting `aliyun ...`) command in this SKILL goes through MCP `AlibabaCloud___CallCLI` by default. Do NOT run them via local `Bash` unless MCP is unavailable.**
+
+Fully qualified MCP tool name (provided by the `alibabacloud-core` plugin):
+`mcp__plugin_alibabacloud-core_alibabacloud-core__AlibabaCloud___CallCLI`
+
+| Command class | Example | Execution path |
+| --- | --- | --- |
+| **API calls** (default → MCP) | `aliyun agentexplorer search-skills`, `list-categories`, `get-skill-content` | `AlibabaCloud___CallCLI` |
+| **Local CLI management** (must → Bash) | `aliyun version`, `aliyun configure ...`, `aliyun configure ai-mode ...`, `aliyun plugin install/update` | Local `Bash` — these touch the local CLI binary/config and cannot run on a remote MCP server |
+| **Skill install** (must → Bash) | `npx skills add ...`, `npx clawhub install ...` | Local `Bash` |
+
+Local `Bash` is a **fallback** for API calls only when MCP is unavailable, when the caller explicitly asks for a copy-pasteable shell command, or when the operation requires local filesystem access. The bash code blocks in the workflow below are written in shell form because they double as user-runnable references — execute them via MCP CallCLI by passing the same command string as `command`, not by shelling out.
 
 ## Installation
 
