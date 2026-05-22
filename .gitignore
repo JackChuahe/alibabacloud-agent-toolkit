@@ -22,3 +22,8 @@ tools/hooks/scripts/test-fixtures/.scratch/
 docs/superpowers/
 superpowers/
 .superpowers/
+__pycache__/
+claude-code-hooks-info.md
+claude-code-tracing-with-langfuse.md
+telemetry_design.md
+aliyun_ai_ops_requirements.md
