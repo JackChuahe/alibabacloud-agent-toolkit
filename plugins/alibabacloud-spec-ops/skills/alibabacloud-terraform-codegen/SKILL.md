@@ -13,7 +13,10 @@ description: |
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.2.0"
+  version: "0.3.0"
+compatibility:
+  tools:
+    - mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___CallCLI
 ---
 
 # Alibaba Cloud Terraform Code Generation
@@ -43,16 +46,20 @@ command actually executed AND returned that status. When a step is skipped
 (tool missing, user opt-out), state **"SKIPPED"** (or **"FAILED"**) with a
 reason. Paraphrasing real output is fine; fabricating it is not.
 
-### 3. `terraform apply` is off-limits
+### 3. No local `terraform` execution
 
-This skill NEVER runs `terraform apply`. `plan` is opt-in (Step 8); `apply` is
-strictly the user's action.
+This skill NEVER runs `terraform` locally — not `fmt`, `init`, `validate`,
+`plan`, or `apply`. Validation routes through MCP (Step 6, `aliyun
+iacservice validate-module` via `AlibabaCloud___CallCLI`). Plan and apply
+belong to a separate skill — in the spec-ops workflow that is
+`alibabacloud-executing-plans`, which runs through Alibaba Cloud IaC
+Service rather than a local binary. See Step 8 for the handoff.
 
 ## Environment (soft recommendations)
 
-- **Terraform ≥ 1.5** recommended. Do not install or download Terraform
-  automatically; Step 6 checks whether `terraform` is on PATH and reports
-  the actual validation status.
+- **MCP** — the `alibabacloud-spec-ops` MCP server must be reachable; all
+  IaCService calls (Step 6 validation, Step 8 handoff context) go through
+  `AlibabaCloud___CallCLI`. No local `terraform` binary is required.
 - **Network** is required — Step 4.2 WebFetches each resource's provider doc.
 
 ## Workflow
@@ -357,42 +364,63 @@ any `DEPRECATED:` line:
    do NOT proceed to Step 6 with any `DEPRECATED:` output. Do NOT claim
    "verified" unless the script produces all `OK:`.
 
-### Step 6. Validate + provider deprecation detection
+### Step 6. Validate via IaCService (remote, MCP)
 
-If `terraform` is on PATH:
+NEVER run `terraform fmt`, `terraform init`, or `terraform validate`
+locally. Validation runs server-side through the MCP tool
+`AlibabaCloud___CallCLI` (fully qualified:
+`mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___CallCLI`)
+with `aliyun iacservice validate-module`. The IaCService backend performs
+Terraform syntax and schema validation without requiring a local
+Terraform binary, network access to `registry.terraform.io`, or backend init.
+
+**Single-file project** (`--code` with HCL text):
 
 ```bash
-(cd <target-dir> \
-  && terraform fmt -recursive \
-  && terraform init -backend=false \
-  && terraform validate -json)
+aliyun iacservice validate-module \
+  --client-token <uuid> \
+  --source Upload \
+  --code "<full HCL of the single .tf file>"
 ```
 
-**Loop until both conditions are met** (max 3 fix attempts total):
+**Multi-file project** (`--code-map` with JSON map of `filename → content`,
+RECOMMENDED whenever the project has more than one `.tf` file):
 
-1. Parse `validate -json`. If there are **errors** → fix the offending
-   file, then go to step 3.
-2. Scan `validate -json` `diagnostics[].summary` for `[DEPRECATED]`
-   strings. The provider emits authoritative deprecation annotations
-   (e.g. `"document": "[DEPRECATED] … New field
-   'assume_role_policy_document' instead."`). If found → fix the
-   matching field, then go to step 3.
-3. Re-run `cd <target-dir> && terraform validate -json` and go back
-   to step 1.
+```bash
+aliyun iacservice validate-module \
+  --client-token <uuid> \
+  --source Upload \
+  --code-map '{"main.tf":"<hcl>","providers.tf":"<hcl>","variables.tf":"<hcl>"}'
+```
 
-Exit the loop only when validate reports **no errors AND no
-`[DEPRECATED]` diagnostics**. After 3 attempts without reaching this
-state: proceed to Step 7 with `Validation: FAILED (<diagnostic excerpt>)`
-and include the failing HCL verbatim in the optional notes.
+Parameter notes:
 
-**If `init` fails with a network error** (cannot reach `registry.terraform.io`):
-not a config bug. Point the user at the mirror-source configuration in
-`references/auth-and-network.md`, then proceed to Step 7 — the Summary
-MUST use `Validation: SKIPPED (init failed — network/unreachable)`.
-Do not retry blindly, do not write `~/.terraformrc` yourself.
+- `--client-token` — UUID, format `[0-9a-zA-Z-]{1,64}`; generate a fresh UUID per call (idempotency key)
+- `--source` — must be `Upload` for inline text
+- `--code` and `--code-map` — mutually exclusive; prefer `--code-map` for multi-file projects so every file is validated together
 
-If `terraform` is absent: SKIP this step and surface that fact in Step 7's
-summary (Hard rule §2) with `Validation: SKIPPED (terraform binary not on PATH)`.
+**Loop until validate passes** (max 3 fix attempts total):
+
+1. Parse the IaCService response. If there are **errors / diagnostics with
+   severity `error`** → fix the offending file in `<target-dir>/`,
+   regenerate the `--code` or `--code-map` payload, then go to step 3.
+2. Scan the response diagnostics for `[DEPRECATED]` strings. The provider
+   emits authoritative deprecation annotations (e.g. `"document":
+   "[DEPRECATED] … New field 'assume_role_policy_document' instead."`).
+   If found → fix the matching field, then go to step 3.
+3. Re-invoke `aliyun iacservice validate-module` via
+   `AlibabaCloud___CallCLI` and go back to step 1.
+
+Exit the loop only when validate reports **no errors AND no `[DEPRECATED]`
+diagnostics**. After 3 attempts without reaching this state: proceed to
+Step 7 with `Validation: FAILED (<diagnostic excerpt>)` and include the
+failing HCL verbatim in the optional notes.
+
+**If the MCP CallCLI fails** (auth, network to OpenAPI endpoint, or
+IaCService backend unavailable): do NOT fall back to local `terraform
+validate`. SKIP this step and surface the failure in Step 7's summary
+(Hard rule §2) with
+`Validation: SKIPPED (iacservice validate-module unavailable — <reason>)`.
 
 ### Step 7. Coverage check + summarize
 
@@ -427,41 +455,69 @@ here is fine, but NOT inside the lines above>
 The `Validation:` line must be **one of these exact strings**, chosen from
 what actually happened in Step 6. Do NOT paraphrase or fold it into prose:
 
-- `Validation: terraform fmt+validate: ok`
-- `Validation: SKIPPED (terraform binary not on PATH)`
+- `Validation: iacservice validate-module: ok`
+- `Validation: SKIPPED (iacservice validate-module unavailable — <reason>)`
 - `Validation: SKIPPED (<reason>)`
 - `Validation: FAILED (<diagnostic excerpt>)` — after 3 retries hit the cap
 
 Edge cases:
-- Init timeout → `Validation: FAILED (init timed out — provider installation exceeded time limit)`
-- Init network-unreachable → `Validation: SKIPPED (init failed — network/unreachable)`
-- Init failed after fmt succeeded → use the root-cause string above, not a
-  hybrid status.
+- MCP CallCLI returns an auth error → `Validation: SKIPPED (iacservice validate-module unavailable — auth)`
+- MCP CallCLI times out → `Validation: SKIPPED (iacservice validate-module unavailable — timeout)`
+- IaCService returns 5xx → `Validation: FAILED (iacservice 5xx: <message>)`
 
-### Step 8 (optional). `terraform plan`
+### Step 8. Execution handoff (NO local `terraform plan` / `apply`)
 
-Only when the user asks. Pre-flight probes **all seven** credential paths
-from `references/auth-and-network.md` without reading any value:
+This skill ends at validation. It does NOT run `terraform plan` or
+`terraform apply` — neither locally nor remotely.
 
-```bash
-(
-  [[ -n "${ALIBABA_CLOUD_ACCESS_KEY_ID:-}" ]] && [[ -n "${ALIBABA_CLOUD_ACCESS_KEY_SECRET:-}" ]] && echo "ready:env-ak-sk"
-  [[ -f "$HOME/.aliyun/config.json" ]]                                                           && echo "ready:shared-config"
-  { [[ -n "${ALIBABA_CLOUD_CREDENTIALS_FILE:-}" ]] && [[ -f "${ALIBABA_CLOUD_CREDENTIALS_FILE}" ]]; } && echo "ready:custom-credentials-file"
-  [[ -n "${ALIBABA_CLOUD_ECS_METADATA:-}" ]]                                                      && echo "ready:ecs-ram-role"
-  [[ -n "${ALIBABA_CLOUD_ROLE_ARN:-}" ]]                                                          && echo "ready:assume-role"
-  [[ -n "${ALIBABA_CLOUD_CREDENTIALS_URI:-}" ]]                                                   && echo "ready:sidecar"
-) | head -1
+In the **alibabacloud-spec-ops workflow**, execution is owned by the
+[`alibabacloud-executing-plans`](../alibabacloud-executing-plans/SKILL.md)
+skill, which runs the generated module through Alibaba Cloud IaC Service
+(remote, MCP-driven). The typical chain is:
+
+```
+alibabacloud-planning
+  → alibabacloud-writing-plans
+    → alibabacloud-terraform-codegen   ← this skill, ends at Step 7
+      → alibabacloud-validate
+        → alibabacloud-executing-plans (plan/apply via IaC Service)
 ```
 
-- **Any line of output** → a credential path is available:
-  `(cd <target-dir> && terraform init && terraform plan -out=tfplan)`;
-  surface the output.
-- **Empty output** → `NO_CREDENTIALS`. Tell the user about **all** viable
-  paths (env AK/SK, shared `~/.aliyun/config.json` + `ALIBABA_CLOUD_PROFILE`,
-  ECS instance RAM role, Assume Role chain, OIDC/RRSA, sidecar URI) — do
-  NOT just push env AK/SK. Point them at `references/auth-and-network.md`
-  for the full setup. Then stop. Never read or print secret values.
+After Step 7 emits a clean `Validation: iacservice validate-module: ok`,
+hand the user back to the upstream caller (usually
+`alibabacloud-writing-plans` or `alibabacloud-validate`) — never invoke
+`terraform plan` here.
+
+If the user is calling this skill standalone (outside the spec-ops
+workflow) and asks for a plan preview, point them at
+`alibabacloud-executing-plans` rather than running terraform locally.
+Credential handling is owned by that skill — never read or print AK/SK
+values from this skill (Hard rule §1).
+
+## IaCService API Reference (via MCP)
+
+All IaCService calls are invoked through MCP tool
+`AlibabaCloud___CallCLI` (fully qualified:
+`mcp__plugin_alibabacloud-spec-ops_alibabacloud-spec-ops__AlibabaCloud___CallCLI`).
+Do NOT shell out to `aliyun` locally — every command in this table goes
+through the MCP CallCLI tool.
+
+| API | CLI Command | Purpose |
+| --- | ----------- | ------- |
+| ListProducts | `aliyun iacservice list-products` | List all Alibaba Cloud products that support Terraform |
+| ListResourceTypes | `aliyun iacservice list-resource-types --product <product>` | List Terraform resource types for a specific product |
+| GetResourceType | `aliyun iacservice get-resource-type --resource-type <resourceType>` | Get all attributes and schema for a Terraform resource type (e.g. `alicloud_vpc`); usable as an alternative to the Step 4.2 WebFetch when the live provider doc is unreachable |
+| ValidateModule | `aliyun iacservice validate-module --source Upload --code <hcl>` (single file) or `--code-map '{<file>: <hcl>, ...}'` (multi file) | Validate Terraform syntax and schema server-side without execution — used by Step 6 |
+
+**`validate-module` parameter reference:**
+
+| Param | Type | Notes |
+| --- | --- | --- |
+| `--client-token` | string `[0-9a-zA-Z-]{1,64}` | Idempotency key, UUID recommended |
+| `--code` | string | When `--source=Upload`, the full HCL text of a single file |
+| `--code-map` | JSON string `{<filename>: <hcl>, ...}` | Multi-file upload; mutually exclusive with `--code` |
+| `--source` | enum | `Upload` for inline text |
+| `--source-path` | string | Source path (when applicable to other source types) |
 
 ## References
 
@@ -469,9 +525,9 @@ from `references/auth-and-network.md` without reading any value:
 | --- | --- |
 | `references/alicloud-providers.md` (local) | Step 4.1 — resource existence, deprecation mark, doc URL |
 | Provider doc (WebFetch of the URL from 4.1) | Step 4.2 — authoritative Required / Optional per resource |
-| `references/deprecated-fields.md` (local) | Step 5.1 — known field-level renames not flagged by `terraform validate` |
+| `references/deprecated-fields.md` (local) | Step 5.1 + Step 5.6 — known field-level renames not flagged by IaCService `validate-module` |
 | `references/resource-patterns.md` (local) | Step 5.1 — product-specific idioms not emphasized by the provider doc (RDS HA, …) |
-| `references/auth-and-network.md` (local) | Step 6 failure branch — mirror-source config; Step 8 pre-flight — full credential chain |
+| `references/auth-and-network.md` (local) | Background reference on credential chain; this skill does not consume credentials itself (Hard rule §1) |
 
 The local catalog is one markdown table row per `alicloud_*` resource and
 data source, with a `[doc](<url>)` cell and, for deprecated entries, a
