@@ -102,7 +102,7 @@ Then open Codex `/plugins` and install `alibabacloud-core` and/or `alibabacloud-
 Want an expert-guided, spec-driven flow that takes "I need a web app on aliyun" all the way to live infrastructure? One command:
 
 ```text
-/alibabacloud-spec-ops:alibabacloud-planning
+/alibabacloud-spec-ops:alibabacloud-planning  I need a web app on aliyun
 ```
 
 4 stages, auto-chained, **one user gate** (right before deploy):
