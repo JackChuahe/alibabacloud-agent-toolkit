@@ -17,7 +17,28 @@ Then you get:
 - 🚀 **远程沙箱执行** —— IaC Service 帮你跑 plan + apply，一次授权一气呵成，全链路审计
 - ↻ **可持续迭代的设计 + 状态** —— `design.md` 和远程 `state_id` 跨会话保留，Day-2 一句"升配 RDS"就在原有基础上做增量，不重建已有资源
 
-—— 想直接动手？ 跟着下面的 6 步指南走。
+## Workflow at a Glance
+
+```mermaid
+flowchart LR
+    classDef plan fill:#e8f0fe,stroke:#1967d2,color:#1967d2
+    classDef code fill:#fef7e0,stroke:#e37400,color:#e37400
+    classDef val  fill:#e6f4ea,stroke:#1e8e3e,color:#1e8e3e
+    classDef exec fill:#fce8e6,stroke:#c5221f,color:#c5221f
+
+    Plan["🧠 Plan<br/>Requirement Scoping<br/>Alibaba Cloud Docs<br/>Best Practices"]:::plan
+    Code["📝 Code<br/>IaC Templates<br/>Schema Verified"]:::code
+    Validate["✔ Validate<br/>Spec Compliance Review<br/>Code Quality Review"]:::val
+    Execute["🚀 Execute<br/>Human-In-The-Loop<br/>Sandboxed Execution"]:::exec
+
+    Plan --> Code --> Validate --> Execute
+    Execute -. "DAY-2: MODIFY & ITERATE" .-> Plan
+```
+
+Two infrastructure lanes run underneath every stage:
+
+- **MCP (Alibaba Cloud CLI) drives every stage** — real-time docs lookup, schema verification, remote IaC Service execution
+- **Observability (Trace + Telemetry) spans the full lifecycle** — every tool call's duration, status, request-id, and outcome is recorded for audit
 
 ## Get Started — Step by Step
 
@@ -69,29 +90,6 @@ Need to scale up or add a service later? Just say it:
 ```
 
 The plugin auto-detects the modification intent, loads the previous `design.md`, and continues on the same remote `state_id` — your existing resources stay, only the delta is applied.
-
-## Workflow at a Glance
-
-```mermaid
-flowchart LR
-    classDef plan fill:#e8f0fe,stroke:#1967d2,color:#1967d2
-    classDef code fill:#fef7e0,stroke:#e37400,color:#e37400
-    classDef val  fill:#e6f4ea,stroke:#1e8e3e,color:#1e8e3e
-    classDef exec fill:#fce8e6,stroke:#c5221f,color:#c5221f
-
-    Plan["🧠 Plan<br/>Requirement Scoping<br/>Alibaba Cloud Docs<br/>Best Practices"]:::plan
-    Code["📝 Code<br/>IaC Templates<br/>Schema Verified"]:::code
-    Validate["✔ Validate<br/>Spec Compliance Review<br/>Code Quality Review"]:::val
-    Execute["🚀 Execute<br/>Human-In-The-Loop<br/>Sandboxed Execution"]:::exec
-
-    Plan --> Code --> Validate --> Execute
-    Execute -. "DAY-2: MODIFY & ITERATE" .-> Plan
-```
-
-Two infrastructure lanes run underneath every stage:
-
-- **MCP (Alibaba Cloud CLI) drives every stage** — real-time docs lookup, schema verification, remote IaC Service execution
-- **Observability (Trace + Telemetry) spans the full lifecycle** — every tool call's duration, status, request-id, and outcome is recorded for audit
 
 ## Each Stage in Detail
 
