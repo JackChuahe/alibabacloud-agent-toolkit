@@ -4,7 +4,7 @@ description: "Execute validated Terraform plans via Alibaba Cloud IaC Service. R
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.6.0"
+  version: "0.7.0"
 ---
 
 # Alibaba Cloud Executing Plans
@@ -50,6 +50,7 @@ Activate when:
 7. **Poll for completion** — IaC Service is async; use sequential MCP calls to poll
 8. ⚠️ **Destructive operations (destroy) require double confirmation**
 9. **Persist `state_id`** — IaC Service keeps the Terraform state remotely keyed by `state_id`. This skill MUST write it back to `tasks/status.json` (under `state.state_id`) on every Plan / Apply / Destroy and MUST pass the saved value on every subsequent Day-2 call. Losing the `state_id` orphans the remote state and forces a fresh deploy (potential duplicate resources).
+10. **Source-of-truth integrity** — Some failures are only discoverable at apply time (SKU offline in target AZ, zone out-of-capacity, etc.). Any spec change forced by such a failure MUST be written back to BOTH `designs/design.md` (with a Decisions Log entry) AND `designs/terraform/*.tf` BEFORE re-running plan/apply. **Never hot-patch the in-flight apply** — Day-2 iterations re-read these files and will redeploy the broken spec if it isn't fixed at the source.
 
 ---
 
@@ -356,6 +357,7 @@ IaC Service operations are **asynchronous**. After submitting a job, poll using 
 | QuotaExceeded | Resource quota limit | Inform user to request quota increase |
 | AccessDenied | Permission missing | Invoke `alibabacloud-ram-permission-diagnose` |
 | ResourceNotFound | Referenced resource missing | Check dependencies |
+| `Invalid*Class.Offline`, `OperationDenied.NoStock`, `Zone.NotOnSale`, etc. | Spec discovered unavailable at plan time | See [Spec-driven Failures](#spec-driven-failures-source-of-truth-recovery) below |
 | InternalError | Service issue | Retry once after informing user |
 
 - Set status back to "plans-written" for re-validation
@@ -372,10 +374,126 @@ AlibabaCloud___CallCLI:
   command: "aliyun iacservice get-execute-state --state-id {STATE_ID}"
 ```
 
-- Offer options:
-  1. Fix and retry apply
-  2. Destroy partially created resources
-  3. Manual intervention guidance
+- Classify the failure first, then offer the right options:
+
+| Failure class | Examples | Where to go |
+|---------------|----------|-------------|
+| **Spec-driven** (resource exists in API catalog but is rejected at create time) | `InvalidDBInstanceClass.Offline`, `OperationDenied.NoStock`, `Zone.NotOnSale`, instance family sold out in target AZ | [Spec-driven Failures](#spec-driven-failures-source-of-truth-recovery) — MANDATORY source-of-truth sync, do NOT hot-patch |
+| **Structural** (HCL refers to something that does not exist or has wrong dependencies) | Wrong VPC ID, missing security group reference, circular dependency | Fix HCL in `designs/terraform/*.tf`, re-run plan/apply (keep state_id) |
+| **Permission** | `AccessDenied`, `Forbidden`, `NoPermission` | Invoke `alibabacloud-spec-ops:alibabacloud-ram-permission-diagnose`; once RAM is fixed re-run apply with same state_id |
+| **Transient** | `ServiceUnavailable`, intermittent 5xx | Re-run apply once with same state_id |
+
+After classification, present these options to the user (in addition to
+the diagnosed root cause):
+
+1. Apply the spec/HCL fix and retry apply
+2. Destroy partially created resources (uses the Destroy gate below)
+3. Pause for manual investigation — keep state_id so we can resume
+
+### Spec-driven Failures (source-of-truth recovery)
+
+Some Alibaba Cloud resource constraints are only discoverable at apply
+time — the API lists a SKU as available but `CreateInstance` returns
+`InvalidDBInstanceClass.Offline`; a zone is out of capacity for a
+specific instance family; an EIP bandwidth-package shape is no longer
+sold. These are not bugs in the generated code — the design was valid
+when planning ran, the reality changed (or the catalog lied).
+
+**Example diagnostic (from a real session):**
+
+> ✅ 17/21 资源已创建成功（VPC, VSwitch, SG+rules, ECS, EIP+关联, OSS+ACL, RAM 全套, random_string）
+> ❌ RDS 实例创建失败 → 由此连带 4 个依赖（账号/库/授权/备份策略）未创建
+> 根因：`mysql.n2.small.1` 在 cn-beijing-i 已下线（API 仍列出，但创建时报 `InvalidDBInstanceClass.Offline`）
+
+**Recovery flow (5 steps — every step MANDATORY):**
+
+#### 1. Diagnose
+
+From the apply error, extract:
+
+- the resource block (`<resource>.<name>`) that failed
+- the failing spec value (e.g. `db_instance_class = "mysql.n2.small.1"`)
+- the region / zone where it failed
+- the upstream error code (`InvalidDBInstanceClass.Offline`,
+  `OperationDenied.NoStock`, …)
+
+#### 2. Query live alternatives via MCP
+
+Use `AlibabaCloud___CallCLI` against the right inventory API to find
+currently-available specs. Pick the API by resource type:
+
+| Resource | Query CLI |
+| --- | --- |
+| RDS instance class | `aliyun rds DescribeAvailableResource --RegionId <region> --ZoneId <zone> --Engine <engine> --EngineVersion <ver>` |
+| ECS instance type | `aliyun ecs DescribeAvailableResource --RegionId <region> --ZoneId <zone> --DestinationResource InstanceType --InstanceChargeType <type>` (or `DescribeRecommendInstanceType`) |
+| Disk category | `aliyun ecs DescribeAvailableResource --RegionId <region> --ZoneId <zone> --DestinationResource DataDisk` |
+| EIP bandwidth | `aliyun vpc DescribeBandwidthPackages --RegionId <region>` |
+| (other) | Whatever `aliyun <service> Describe*Resource` / `Describe*Availability` exists |
+
+Filter the response down to specs with **the closest match on CPU /
+memory / IOPS / charge type** to the failed one. Pick 1–3 candidates;
+mark one with ⭐ as the minimal-diff recommendation.
+
+#### 3. Ask the user (explicit, with `AskUserQuestion`)
+
+Surface diagnosis + candidates as distinct options:
+
+```
+AskUserQuestion:
+  question: "RDS 规格 mysql.n2.small.1 在 cn-beijing-i 已下线，apply 中断。要换成下列哪个继续？"
+  header: "替代规格"
+  options:
+    - label: "mysql.n2e.small.1 (推荐)"
+      description: "n2e 新一代，同 1C2G 规格，同价位（最小改动）"
+    - label: "mysql.x2.medium.1"
+      description: "x2 系列，1C2G，新一代主推，价格 +12%"
+    - label: "暂停 — 我自己来查"
+      description: "保留已创建的 17 个资源和 state_id，稍后我手动决定后再重新触发 apply"
+```
+
+Never auto-pick a replacement, even if "obvious". Spec changes can
+affect cost, performance, and compliance — the user owns this call.
+
+#### 4. Sync source-of-truth (BOTH design.md AND .tf — non-negotiable)
+
+Once user confirms a replacement, **before any re-run**:
+
+1. **`designs/design.md`**:
+   - Update the affected resource entry with the new spec
+   - Append to **Decisions Log** (or create the section if missing):
+     ```
+     - {ISO timestamp}: RDS 实例规格 mysql.n2.small.1 → mysql.n2e.small.1
+       原因：原规格在 cn-beijing-i 已下线（apply 时报 InvalidDBInstanceClass.Offline）
+       影响：1C2G/同价位，无性能/成本变化
+     ```
+2. **`designs/terraform/*.tf`**:
+   - Replace the failing field value(s); only edit the lines required
+   - Do NOT reformat unrelated code; keep the diff minimal so the
+     change is auditable
+
+This is Rule 10. Skipping either file silently breaks Day-2:
+- Skip design.md → next Day-2 planning reads stale design and "fixes"
+  the difference back to the broken spec
+- Skip .tf → next plan still fails the same way
+
+#### 5. Re-run plan + apply with retained state_id
+
+The original `state_id` is already in `tasks/status.json`. Re-enter
+Step 3 of the main Process with the patched HCL:
+
+```
+AlibabaCloud___CallCLI:
+  command: "aliyun iacservice execute-terraform-plan --code '{NEW_CODE}' --state-id {STATE_ID} --client-token {NEW_UUID}"
+```
+
+The 17 already-created resources stay (state remembers them); only
+the failed 4 + any that depend on them are created. Apply auto-flows
+per Rule 2.
+
+If the user picked **"暂停 — 我自己来查"** in Step 3:
+- Leave `status: "executing"` (do NOT roll back to `validated`)
+- Leave TODO task 3 `in_progress`
+- Tell user how to resume: "已保留 state_id `{STATE_ID}` 和已创建的 17 个资源。手动定夺规格后回到本会话回复"继续 apply"，我会用更新后的 HCL 在同一 state 上 resume。"
 
 ### Destroy Operations
 
