@@ -142,9 +142,18 @@ Read: (each .tf file)
 # Read execution history (if exists)
 Read: .aliyun-ai-ops-spec/{name}/tasks/tf-apply-result.md
 
-# Read current status
+# Read current status — also captures the remote state handle
 Read: .aliyun-ai-ops-spec/{name}/tasks/status.json
 ```
+
+From `status.json`, also capture `state.state_id`. This is the IaC Service
+remote state handle that lets the downstream `executing-plans` skill
+continue on the existing deployment instead of creating fresh resources.
+**Do not modify or delete `state.state_id`** — planning is read-only with
+respect to it. If `status == "executed"` but `state.state_id` is missing,
+flag the legacy edge case to the user (see
+[`executing-plans/references/iac-service-api.md` → State Persistence](../../alibabacloud-executing-plans/references/iac-service-api.md))
+so the migration question gets resolved before any new code is generated.
 
 **After loading, summarize to user:**
 
@@ -156,7 +165,13 @@ Read: .aliyun-ai-ops-spec/{name}/tasks/status.json
 > - SLB: 公网, 按量付费
 > - VPC + 2 VSwitch (cn-hangzhou-h, cn-hangzhou-i)
 >
+> **远程状态：** 沿用已有部署 (`state_id: {state.state_id}`)，本次变更会在该状态上做 plan/apply，不会重复创建资源。
+>
 > **你想进行什么变更？**"
+
+When `state.state_id` is absent (e.g. project only reached `validated` and
+never executed), omit the "远程状态" line — there is nothing to continue
+on.
 
 #### Step 5: Enter Normal Flow with Context
 
@@ -168,7 +183,7 @@ After understanding the change request, proceed to **Phase 1 (Clarify)** with th
 | Mode decision context | Assess total complexity | Assess **change** complexity (small change → Fast Track) |
 | Design output | New design.md | **Updated** design.md (preserve existing, add/modify sections) |
 | Terraform output | New .tf files | **Modified** .tf files (add resources, change specs) |
-| Status tracking | Start from "designed" | Update existing status, add `"change_type": "modify"` |
+| Status tracking | Start from "designed" | Update existing status, set `"change_type": "modify"`, **preserve `state.state_id`** so executing-plans iterates on the same remote state |
 
 **Change complexity → Mode mapping:**
 
@@ -843,6 +858,7 @@ Use Playwright `browser_navigate` to open the file for the user if they want to 
 {
   "name": "{requirement-name}",
   "status": "designed",
+  "change_type": "create",
   "created_at": "{ISO timestamp}",
   "updated_at": "{ISO timestamp}",
   "phases": {
@@ -850,9 +866,23 @@ Use Playwright `browser_navigate` to open the file for the user if they want to 
     "writing": "pending",
     "validation": "pending",
     "execution": "pending"
+  },
+  "state": {
+    "state_id": null,
+    "last_plan_at": null,
+    "last_apply_at": null,
+    "last_destroy_at": null
   }
 }
 ```
+
+**Day-2 modification:** when re-entering planning on an existing project,
+do NOT overwrite the `state` object — read it, preserve every field, set
+`change_type` to `"modify"`, and update only `status` + `updated_at`.
+`executing-plans` is the sole writer of `state.*` fields after the initial
+scaffold here.
+
+See [`../alibabacloud-writing-plans/references/directory-structure.md` → Status JSON Schema](../alibabacloud-writing-plans/references/directory-structure.md) for the full schema reference.
 
 ---
 

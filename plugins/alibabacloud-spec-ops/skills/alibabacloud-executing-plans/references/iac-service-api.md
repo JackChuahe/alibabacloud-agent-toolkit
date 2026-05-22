@@ -164,6 +164,48 @@ AlibabaCloud___CallCLI:
 }
 ```
 
+## State Persistence (Day-1 vs Day-2)
+
+IaC Service stores each deployment's Terraform state remotely, indexed by
+the `state_id` returned from `execute-terraform-plan`. The
+`executing-plans` skill is responsible for round-tripping this value
+through `tasks/status.json` so that subsequent invocations (Day-2
+iteration, retry-after-failure, destroy) continue on the same remote state
+instead of creating a new one.
+
+### Lifecycle
+
+| Trigger | status.json field | Action |
+| --- | --- | --- |
+| Plan response received | `state.state_id`, `state.last_plan_at` | Write **before** showing plan to user / polling |
+| Apply succeeds | `state.last_apply_at` | Re-confirm `state_id` matches; never overwrite with a different value silently |
+| Plan fails | (unchanged) | Keep any prior `state_id`; failed plan does not delete remote state |
+| Destroy succeeds | `state.last_destroy_at`, top-level `status: "destroyed"` | Keep `state_id` as historical record |
+
+### Day-1 vs Day-2 call shape
+
+| Scenario | Prior `state.state_id` | Plan CLI |
+| --- | --- | --- |
+| Day-1 (first ever plan/apply for this requirement) | absent / empty | `execute-terraform-plan --code '{HCL}' --client-token <uuid>` |
+| Day-2 (iteration on existing infra) | present | `execute-terraform-plan --code '{HCL}' --state-id <id> --client-token <uuid>` |
+
+`execute-terraform-apply` always passes `--state-id`. It accepts an
+optional `--code` only when the HCL changed between plan and apply
+(usually it didn't — code is final at plan time).
+
+### Legacy / migration
+
+If status.json has `status: "executed"` but `state.state_id` is missing
+(file predates this schema), the safe response is to STOP and ask the
+user. Choices:
+
+- Treat as Day-1 → fresh state, risks duplicate resources alongside the
+  legacy live infrastructure
+- Have the user paste a known `state_id` to adopt
+- Abort
+
+Never silently start a new state.
+
 ## Polling Strategy
 
 1. Initial wait: ~5 seconds (inform user execution is in progress)

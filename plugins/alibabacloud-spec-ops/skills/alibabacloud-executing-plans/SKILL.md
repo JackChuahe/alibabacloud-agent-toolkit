@@ -4,7 +4,7 @@ description: "Execute validated Terraform plans via Alibaba Cloud IaC Service. R
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # Alibaba Cloud Executing Plans
@@ -49,6 +49,44 @@ Activate when:
 6. **Support rollback** — Provide destroy option if apply fails
 7. **Poll for completion** — IaC Service is async; use sequential MCP calls to poll
 8. ⚠️ **Destructive operations (destroy) require double confirmation**
+9. **Persist `state_id`** — IaC Service keeps the Terraform state remotely keyed by `state_id`. This skill MUST write it back to `tasks/status.json` (under `state.state_id`) on every Plan / Apply / Destroy and MUST pass the saved value on every subsequent Day-2 call. Losing the `state_id` orphans the remote state and forces a fresh deploy (potential duplicate resources).
+
+---
+
+## State Persistence (CRITICAL for Day-2)
+
+IaC Service stores each deployment's Terraform state remotely, indexed by
+`state_id`. This handle is the contract that lets you iterate on the same
+infrastructure across multiple `executing-plans` invocations:
+
+| When | Read | Write |
+| --- | --- | --- |
+| Step 1 (start) | `tasks/status.json` → `state.state_id` (may be empty on first run) | — |
+| Step 3 (after plan response) | — | `state.state_id`, `state.last_plan_at` |
+| Step 5/6 (after apply succeeds) | — | `state.state_id` (re-confirm), `state.last_apply_at` |
+| Destroy (after success) | — | `state.last_destroy_at`; keep `state_id` as historical record |
+
+**Branching by Day-1 vs Day-2:**
+
+| Scenario | Saved `state_id` | Plan CLI |
+| --- | --- | --- |
+| Day-1 (first run) | absent / empty | `--code '{CODE}' --client-token <uuid>` |
+| Day-2 (iteration) | present | `--code '{CODE}' --state-id {STATE_ID} --client-token <uuid>` |
+
+Apply always passes `--state-id`; pass `--code` too only when the HCL
+changed between plan and apply (rare — usually code is already final at
+plan time).
+
+**Legacy / migration edge case.** If status is `executed` but `state.state_id`
+is absent (status.json predates this schema), STOP before touching the
+remote — ask the user whether to:
+
+- (a) treat this as Day-1 and create a fresh state (risks duplicate
+  resources alongside the legacy deployment), or
+- (b) abort and let the user supply the missing `state_id` manually
+  (recommended if they know it).
+
+Never silently start fresh — the user paid for those resources.
 
 ---
 
@@ -71,9 +109,21 @@ Activate when:
 
 ### Step 1: Verify Prerequisites
 
-1. Read `tasks/status.json` — must be "validated"
-2. Read `tasks/validation-report.md` — must show all stages PASS
-3. Confirm user intent one more time:
+1. Read `tasks/status.json`:
+   - `status` must be `"validated"` (Day-1) OR `"executed"` (Day-2 re-iteration after planning produced new code)
+   - Capture `state.state_id` into `{STATE_ID}` (may be empty on first run — that signals Day-1)
+   - If `status == "executed"` but `state.state_id` is missing, see the
+     legacy edge case in [State Persistence](#state-persistence-critical-for-day-2) before proceeding
+2. Read `tasks/validation-report.md` — must show all reviews PASS
+3. Confirm user intent one more time, and surface whether this is Day-1 or Day-2:
+
+> "Ready to execute Terraform.
+>
+> {Day-1: This will create real cloud resources on Alibaba Cloud and incur costs.}
+> {Day-2: This will update the existing deployment (state `{STATE_ID}`); changes
+>         shown in the next plan output will be applied to the live resources.}
+>
+> Proceed with `terraform plan`?"
 
 > "Ready to execute Terraform. This will:
 > - Create real cloud resources on Alibaba Cloud
@@ -97,18 +147,48 @@ Concatenate all content into one `CODE` string. This will be passed inline via `
 
 ### Step 3: Execute Terraform Plan
 
-**Call MCP tool with inline template content:**
+**Branch by whether `{STATE_ID}` was loaded in Step 1.**
+
+**Day-1 (no prior `state_id`):**
 
 ```
 AlibabaCloud___CallCLI:
   command: "aliyun iacservice execute-terraform-plan --code '{CODE}' --client-token {CLIENT_TOKEN}"
 ```
 
+**Day-2 (continuing on saved `state_id`):**
+
+```
+AlibabaCloud___CallCLI:
+  command: "aliyun iacservice execute-terraform-plan --code '{CODE}' --state-id {STATE_ID} --client-token {CLIENT_TOKEN}"
+```
+
 Where:
 - `{CODE}` = concatenated .tf content (single quotes properly escaped)
 - `{CLIENT_TOKEN}` = fresh UUID (format `[0-9a-zA-Z-]{1,64}`) — required for idempotency
+- `{STATE_ID}` = value from `tasks/status.json` → `state.state_id` (Day-2 only)
 
-**Response contains a state file ID (typically `StateId`)** — save it as `{STATE_ID}` for subsequent calls.
+**Response contains a state file ID (typically `StateId`)** — capture it as
+`{STATE_ID}`. On Day-2 it will match the value passed in; on Day-1 this is
+the freshly minted one.
+
+**PERSIST IMMEDIATELY** — before polling, before showing the plan output to
+the user, silently update `tasks/status.json`:
+
+```json
+{
+  ...,
+  "state": {
+    "state_id": "{STATE_ID}",
+    "last_plan_at": "{ISO timestamp}",
+    ...
+  }
+}
+```
+
+Rationale: if the user aborts at the Step 4 confirmation, the next
+invocation must still be able to continue on this state. **Never poll or
+proceed before this write completes.**
 
 **Poll for completion** (see Polling Strategy below):
 
@@ -142,15 +222,21 @@ Ask for explicit confirmation:
 
 ### Step 5: Execute Terraform Apply
 
-Only after user confirms. Reuse `{STATE_ID}` from Step 3's plan and use a **fresh** `--client-token` (different UUID):
+Only after user confirms. Reuse `{STATE_ID}` (saved in Step 3) and a
+**fresh** `--client-token` (different UUID from the plan call):
 
 ```
 AlibabaCloud___CallCLI:
   command: "aliyun iacservice execute-terraform-apply --state-id {STATE_ID} --client-token {CLIENT_TOKEN}"
 ```
 
-If the HCL changed after plan, also pass `--code '{CODE}'` (mutually included with `--state-id`).
-The apply response returns the same `{STATE_ID}` (re-confirm before polling).
+If the HCL changed after plan (rare — usually it didn't), also pass
+`--code '{CODE}'` (mutually included with `--state-id`).
+
+The apply response returns the same `{STATE_ID}` — re-confirm it matches
+the saved value before polling. If for any reason a NEW state_id appears,
+treat that as an anomaly: stop, alert the user, and do NOT overwrite the
+saved one without explicit confirmation.
 
 **Poll for completion:**
 
@@ -191,7 +277,25 @@ SUCCESS / FAILED
 
 ### Step 7: Update Internal State
 
-Silently update `tasks/status.json` to `status: "executed"`. **Do NOT mention this to the user.**
+Silently update `tasks/status.json`. **Do NOT mention this file to the user.**
+
+```json
+{
+  ...,
+  "status": "executed",
+  "updated_at": "{ISO timestamp}",
+  "state": {
+    "state_id": "{STATE_ID}",
+    "last_plan_at": "{from Step 3}",
+    "last_apply_at": "{ISO timestamp of successful apply}",
+    "last_destroy_at": null
+  }
+}
+```
+
+`state.state_id` MUST be retained even on Day-2 transitions (do not clear
+it between iterations). Subsequent `executing-plans` invocations will read
+it back in Step 1 to continue on the same remote state.
 
 ---
 
@@ -234,6 +338,9 @@ IaC Service operations are **asynchronous**. After submitting a job, poll using 
 | InternalError | Service issue | Retry once after informing user |
 
 - Set status back to "plans-written" for re-validation
+- **Keep `state.state_id`** in status.json if one was already saved from a
+  prior successful run — never delete it on a plan failure. The remote
+  state still exists and the next attempt must continue on it.
 
 ### Apply Fails
 - Record error in `tasks/tf-apply-result.md`
@@ -268,6 +375,26 @@ AlibabaCloud___CallCLI:
 ```
 
 Poll for completion using same strategy as apply.
+
+After destroy succeeds, update `tasks/status.json`:
+
+```json
+{
+  ...,
+  "status": "destroyed",
+  "updated_at": "{ISO timestamp}",
+  "state": {
+    "state_id": "{STATE_ID}",
+    "last_plan_at": "{prior}",
+    "last_apply_at": "{prior}",
+    "last_destroy_at": "{ISO timestamp}"
+  }
+}
+```
+
+**Keep `state.state_id` as a historical record** — do not clear it. If the
+user later wants to redeploy fresh (new state), planning will detect
+`status == "destroyed"` and prompt for net-new Day-1 vs reuse decision.
 
 ---
 
@@ -332,4 +459,6 @@ Poll for completion using same strategy as apply.
 - **Always inline content** — Read files first, pass content as string to MCP
 - **Always record** — Every operation logged to tasks/
 - **Always poll** — Don't assume completion; verify state via MCP
+- **Always persist `state_id`** — Write to `tasks/status.json` → `state.state_id` immediately after every plan response; never proceed without saving
+- **Never orphan remote state** — Keep `state.state_id` across re-iterations and even after destroy (historical record); only the user may decide to discard it
 - **Fail safe** — On error, stop and inform user; don't retry blindly
