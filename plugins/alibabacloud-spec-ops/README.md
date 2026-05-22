@@ -3,13 +3,56 @@
 > A complete **infrastructure operations methodology** for coding agents on Alibaba Cloud.
 > Don't let agents blindly write Terraform — make them **think like an architect, validate like a reviewer, execute like an SRE, and iterate continuously**.
 
-## Quick Start
+## Get Started — Step by Step
+
+### 1. Install the plugin
+
+In Claude Code:
+
+```text
+/plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
+/plugin install alibabacloud-spec-ops@alibabacloud-agent-toolkit
+/reload-plugins
+```
+
+For Codex and other clients, see [Install](#install) below.
+
+### 2. One-time prerequisites
+
+- **`aliyun` CLI configured** — `aliyun configure` with a valid AccessKey, or rely on AssumeRole / OIDC / ECS RAM role. The plugin never reads or stores AK/SK itself.
+- **`uvx` on PATH** — install via `brew install uv` (macOS) or `curl -LsSf https://astral.sh/uv/install.sh | sh` (Linux/WSL). The plugin's MCP server boots through `uvx alibabacloud.mcp-proxy@latest`.
+
+### 3. Kick off the workflow
+
+Pass your requirement inline (or after the prompt — both work):
 
 ```text
 /alibabacloud-spec-ops:alibabacloud-planning   I need a web app on aliyun
 ```
 
-One command (pass your requirement inline or just say it after). Four auto-chained stages. **One user gate** (right before deploy).
+The planner asks 2–8 clarifying questions (Fast Track vs Full Mode auto-picked by complexity), evaluates every key choice across **Security / Cost / Efficiency / Stability**, then proposes 1–3 architectures with cost estimates.
+
+### 4. Approve the design
+
+When the final design + cost estimate is shown, reply **"确认"** (or `confirm`). The plugin then auto-chains the next two stages and renders a 3-task TODO list so you always see how far through the pipeline you are:
+
+```text
+writing-plans → terraform-codegen → validate (spec + quality reviewers in parallel)
+```
+
+### 5. Approve the deploy — the ONLY user gate
+
+After validation passes, the plugin asks once whether to deploy. Reply **"部署"** (or `yes`). Then `terraform plan` + `apply` run **automatically** through Alibaba Cloud IaC Service — sandboxed, with a full audit trace. You can still interrupt mid-stream if `plan` output reveals anything unexpected; spec-driven failures (e.g. a SKU offline in the target AZ) automatically stop and ask you for a replacement.
+
+### 6. Iterate (Day-2)
+
+Need to scale up or add a service later? Just say it:
+
+```text
+/alibabacloud-spec-ops:alibabacloud-planning   RDS 升配到 2C4G + 加一台 ECS
+```
+
+The plugin auto-detects the modification intent, loads the previous `design.md`, and continues on the same remote `state_id` — your existing resources stay, only the delta is applied.
 
 ## Workflow at a Glance
 
