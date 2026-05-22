@@ -6,10 +6,10 @@
 ## Quick Start
 
 ```text
-/alibabacloud-spec-ops:alibabacloud-planning
+/alibabacloud-spec-ops:alibabacloud-planning   I need a web app on aliyun
 ```
 
-One command. Four auto-chained stages. **One user gate** (right before deploy).
+One command (pass your requirement inline or just say it after). Four auto-chained stages. **One user gate** (right before deploy).
 
 ## Workflow at a Glance
 
