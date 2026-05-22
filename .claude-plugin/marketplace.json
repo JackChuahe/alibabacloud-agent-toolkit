@@ -18,7 +18,24 @@
       ],
       "name": "alibabacloud-core",
       "source": "./plugins/alibabacloud-core",
-      "version": "1.0.0"
+      "version": "1.0.9"
+    },
+    {
+      "category": "cloud",
+      "description": "Alibaba Cloud AI Ops Plugin - Infrastructure operations workflow with intelligent planning, validation, and execution powered by MCP tooling.",
+      "keywords": [
+        "alibabacloud",
+        "aliyun",
+        "cloud",
+        "infrastructure",
+        "terraform",
+        "iac",
+        "ops",
+        "devops"
+      ],
+      "name": "alibabacloud-spec-ops",
+      "source": "./plugins/alibabacloud-spec-ops",
+      "version": "0.1.0"
     }
   ]
 }

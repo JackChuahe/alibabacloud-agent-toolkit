@@ -13,10 +13,10 @@ This repository provides Alibaba Cloud agent plugins, skills, MCP configuration,
 The repository currently provides:
 
 - A top-level project scaffold for marketplace manifests, validation, CI, rules, and shared skills.
-- One active plugin: [`alibabacloud-core`](plugins/alibabacloud-core/).
+- Two active plugins: [`alibabacloud-core`](plugins/alibabacloud-core/) and [`alibabacloud-spec-ops`](plugins/alibabacloud-spec-ops/).
 - Placeholder plugin directories for future agent and data analytics plugins.
 
-The `alibabacloud-core` plugin includes an SDK usage skill that generates Alibaba Cloud OpenAPI interaction code through a constrained MCP server.
+`alibabacloud-core` includes an SDK usage skill that generates Alibaba Cloud OpenAPI interaction code through a constrained MCP server. `alibabacloud-spec-ops` delivers a planning-to-execution workflow for Alibaba Cloud infrastructure operations driven by Terraform and IaC Service.
 
 ## Repository Layout
 
@@ -24,6 +24,7 @@ The `alibabacloud-core` plugin includes an SDK usage skill that generates Alibab
 .
 ├── plugins/
 │   ├── alibabacloud-core/
+│   ├── alibabacloud-spec-ops/
 │   ├── alibabacloud-agent/
 │   └── alibabacloud-data-analytics/
 ├── rules/
@@ -46,6 +47,7 @@ re-introduction of a `hooks/` symlink.
 | Plugin | Status | Description |
 |--------|--------|-------------|
 | [alibabacloud-core](plugins/alibabacloud-core/) | Active | Alibaba Cloud OpenAPI SDK code generation using the local `alibabacloud-core` MCP server. |
+| [alibabacloud-spec-ops](plugins/alibabacloud-spec-ops/) | Active | Spec-driven Alibaba Cloud infrastructure ops workflow: planning → Terraform codegen → validation → execution via IaC Service. |
 | `alibabacloud-agent` | Placeholder | Reserved for future agent-focused capabilities. |
 | `alibabacloud-data-analytics` | Placeholder | Reserved for future analytics and data workflow capabilities. |
 
@@ -76,7 +78,7 @@ curl -fsSL https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz | tar 
 brew install aliyun-cli
 ```
 
-## Install `alibabacloud-core`
+## Install Plugins
 
 ### Codex
 
@@ -84,13 +86,14 @@ brew install aliyun-cli
 codex plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
 ```
 
-Then open Codex `/plugins` and install `alibabacloud-core`.
+Then open Codex `/plugins` and install `alibabacloud-core` and/or `alibabacloud-spec-ops`.
 
 ### Claude Code
 
 ```text
 /plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
 /plugin install alibabacloud-core@alibabacloud-agent-toolkit
+/plugin install alibabacloud-spec-ops@alibabacloud-agent-toolkit
 /reload-plugins
 ```
 
