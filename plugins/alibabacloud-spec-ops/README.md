@@ -3,6 +3,22 @@
 > A complete **infrastructure operations methodology** for coding agents on Alibaba Cloud.
 > Don't let agents blindly write Terraform — make them **think like an architect, validate like a reviewer, execute like an SRE, and iterate continuously**.
 
+## TL;DR — One command, full SDD treatment
+
+```text
+/alibabacloud-spec-ops:alibabacloud-planning   I need a web app on aliyun
+```
+
+Then you get:
+
+- 🧠 **一组阿里云专家**陪你**澄清需求** —— Security / Cost / Efficiency / Stability 四维度逐项问诊，把模糊的"我想要个 web app"挖成精确的架构方案
+- 📝 **schema-verified Terraform** —— IaCService 实时校验，不胡编资源属性
+- ✅ **双独立 reviewer 并行评审** —— spec 满足度 + 代码质量，挡在执行之前
+- 🚀 **远程沙箱执行** —— IaC Service 帮你跑 plan + apply，一次授权一气呵成，全链路审计
+- ↻ **可持续迭代的设计 + 状态** —— `design.md` 和远程 `state_id` 跨会话保留，Day-2 一句"升配 RDS"就在原有基础上做增量，不重建已有资源
+
+—— 想直接动手？ 跟着下面的 6 步指南走。
+
 ## Get Started — Step by Step
 
 ### 1. Install the plugin
