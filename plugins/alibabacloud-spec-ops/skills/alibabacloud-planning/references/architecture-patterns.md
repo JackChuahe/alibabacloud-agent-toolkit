@@ -9,6 +9,7 @@ Internet → SLB/ALB → ECS (Auto Scaling Group) → RDS (Multi-AZ)
 ```
 
 **Components:**
+
 - SLB or ALB for load balancing
 - ECS instances in Auto Scaling Group across 2+ AZs
 - RDS MySQL/PostgreSQL with Multi-AZ deployment
@@ -30,6 +31,7 @@ Internet → ALB/Ingress → ACK Cluster → Service Mesh (ASM)
 ```
 
 **Components:**
+
 - ACK (Container Service for Kubernetes) managed cluster
 - ALB Ingress Controller
 - ASM (Service Mesh) for service-to-service communication
@@ -51,6 +53,7 @@ Internet → API Gateway → Function Compute → TableStore/RDS
 ```
 
 **Components:**
+
 - API Gateway for HTTP routing
 - Function Compute (FC) for business logic
 - TableStore or RDS Serverless for data
@@ -71,6 +74,7 @@ Sources → DataHub/Kafka → MaxCompute/Flink → DataWorks → QuickBI
 ```
 
 **Components:**
+
 - DataHub or Kafka for data ingestion
 - MaxCompute for batch processing
 - Flink (Realtime Compute) for stream processing
@@ -91,6 +95,7 @@ Data → PAI-DSW (Development) → PAI-EAS (Serving)
 ```
 
 **Components:**
+
 - PAI-DSW for model development
 - PAI-EAS for model serving
 - Bailian (Model Studio) for LLM applications
@@ -110,6 +115,7 @@ On-Premises ←→ Express Connect/VPN → VPC → Cloud Resources
 ```
 
 **Components:**
+
 - Express Connect or VPN Gateway for hybrid connectivity
 - CEN (Cloud Enterprise Network) for multi-region networking
 - DNS for service discovery
@@ -123,6 +129,7 @@ On-Premises ←→ Express Connect/VPN → VPC → Cloud Resources
 ## Cross-Cutting Concerns
 
 ### Tagging Strategy
+
 ```
 Environment: production/staging/development
 Project: {project-name}
@@ -132,12 +139,14 @@ ManagedBy: terraform
 ```
 
 ### Naming Convention
+
 ```
 {environment}-{region-short}-{project}-{resource-type}-{index}
 Example: prod-cn-hz-webapp-ecs-001
 ```
 
 ### Environment Separation
+
 - Separate VPCs per environment (not just Security Groups)
 - Separate RAM accounts per environment
 - Use Terraform workspaces or separate state files

@@ -16,6 +16,7 @@
 | Security group management | `ecs:DescribeSecurityGroups`, `ecs:AuthorizeSecurityGroup`, `ecs:RevokeSecurityGroup` | `acs:ecs:*:*:securitygroup/*` |
 
 ### Recommended System Policies
+
 - Read-only operations: `AliyunECSReadOnlyAccess`
 - Operational access (no create/delete): `AliyunECSOperatorAccess`
 - Full control: `AliyunECSFullAccess`
@@ -35,6 +36,7 @@
 | Bucket management | `oss:CreateBucket`, `oss:DeleteBucket`, `oss:GetBucketInfo` | `acs:oss:*:*:*` |
 
 ### Recommended System Policies
+
 - Read-only: `AliyunOSSReadOnlyAccess`
 - Full control: `AliyunOSSFullAccess`
 
@@ -53,6 +55,7 @@
 | Whitelist management | `rds:ModifySecurityIps`, `rds:DescribeDBInstanceIPArrayList` | `acs:rds:*:*:dbinstance/*` |
 
 ### Recommended System Policies
+
 - Read-only: `AliyunRDSReadOnlyAccess`
 - Full control: `AliyunRDSFullAccess`
 
@@ -70,6 +73,7 @@
 | Trigger management | `fc:CreateTrigger`, `fc:UpdateTrigger`, `fc:ListTriggers` | `acs:fc:*:*:services/*/functions/*/triggers/*` |
 
 ### Recommended System Policies
+
 - Read-only: `AliyunFCReadOnlyAccess`
 - Full control: `AliyunFCFullAccess`
 
@@ -86,6 +90,7 @@
 | Backend servers | `slb:AddBackendServers`, `slb:RemoveBackendServers` | `acs:slb:*:*:loadbalancer/*` |
 
 ### Recommended System Policies
+
 - Read-only: `AliyunSLBReadOnlyAccess`
 - Full control: `AliyunSLBFullAccess`
 
@@ -102,6 +107,7 @@
 | EIP management | `vpc:AllocateEipAddress`, `vpc:AssociateEipAddress`, `vpc:DescribeEipAddresses` | `acs:vpc:*:*:eip/*` |
 
 ### Recommended System Policies
+
 - Read-only: `AliyunVPCReadOnlyAccess`
 - Full control: `AliyunVPCFullAccess`
 
@@ -118,5 +124,6 @@
 | Project management | `log:CreateProject`, `log:ListProject` | `acs:log:*:*:*` |
 
 ### Recommended System Policies
+
 - Read-only: `AliyunLogReadOnlyAccess`
 - Full control: `AliyunLogFullAccess`

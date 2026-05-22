@@ -79,6 +79,7 @@ Unlike most terraform knobs, the mirror is **not an environment variable**
 — it has to be a CLI config file.
 
 **File location** (the one Terraform reads by default):
+
 - Linux / macOS: `~/.terraformrc`
 - Windows: `%APPDATA%/terraform.rc`
 - Custom: point `TF_CLI_CONFIG_FILE` at any `*.tfrc`.

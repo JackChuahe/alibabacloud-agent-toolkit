@@ -26,6 +26,7 @@ metadata:
 > 2. **User explicitly confirmed** they want to execute
 >
 > If EITHER is missing, **STOP IMMEDIATELY**:
+>
 > - Not validated? → Invoke **alibabacloud:validate** first
 > - No user confirmation? → Ask user before proceeding
 
@@ -34,6 +35,7 @@ metadata:
 ## Triggers
 
 Activate when:
+
 - User explicitly asks to execute/apply the Terraform plan
 - User confirms they want to proceed after validation passes
 
@@ -94,11 +96,13 @@ Never silently start fresh — the user paid for those resources.
 ## MCP Execution Model
 
 **CRITICAL: The `AlibabaCloud___CallCLI` MCP tool runs on a REMOTE server. It CANNOT:**
+
 - Access local files (no `file://`, no `$(cat ...)`, no local paths)
 - Use shell operators (`|`, `>`, `&&`, `$()`)
 - Use shell variables or environment variables
 
 **Therefore, you MUST:**
+
 1. Use the `Read` tool to read `.tf` file contents into your context
 2. Concatenate all `.tf` files into a single string and pass it inline via `--code`
 3. Escape single quotes in HCL content (replace `'` with `'\''` if needed)
@@ -122,13 +126,7 @@ Never silently start fresh — the user paid for those resources.
 >
 > {Day-1: This will create real cloud resources on Alibaba Cloud and incur costs.}
 > {Day-2: This will update the existing deployment (state `{STATE_ID}`); changes
->         shown in the next plan output will be applied to the live resources.}
->
-> Proceed with `terraform plan`?"
-
-> "Ready to execute Terraform. This will:
-> - Create real cloud resources on Alibaba Cloud
-> - Incur costs based on the resources provisioned
+> shown in the next plan output will be applied to the live resources.}
 >
 > Proceed with `terraform plan`?"
 
@@ -165,6 +163,7 @@ AlibabaCloud___CallCLI:
 ```
 
 Where:
+
 - `{CODE}` = concatenated .tf content (single quotes properly escaped)
 - `{CLIENT_TOKEN}` = fresh UUID (format `[0-9a-zA-Z-]{1,64}`) — required for idempotency
 - `{STATE_ID}` = value from `tasks/status.json` → `state.state_id` (Day-2 only)
@@ -211,8 +210,9 @@ Display:
 
 > "Terraform plan results:
 >
-> + {N} resources to create
+> - {N} resources to create
 > ~ {N} resources to modify
+>
 > - {N} resources to destroy
 >
 > {Summary of key resources}
@@ -225,6 +225,7 @@ was discussed), STOP and surface it as a question — this is a safety
 override, not the default flow:
 
 > "⚠️ plan 中检测到非预期的破坏性变更：
+>
 > - `<resource>` 将被 destroy/replace
 >
 > 这通常不在变更范围内，是否确认继续？回复 **\"继续\"** 才会 apply；回复 **\"停\"** 我立刻中止。"
@@ -348,6 +349,7 @@ IaC Service operations are **asynchronous**. After submitting a job, poll using 
 ## Error Handling
 
 ### Plan Fails
+
 - Record error in `tasks/tf-plan-result.md`
 - Identify root cause from `ErrorMessage`:
 
@@ -366,6 +368,7 @@ IaC Service operations are **asynchronous**. After submitting a job, poll using 
   state still exists and the next attempt must continue on it.
 
 ### Apply Fails
+
 - Record error in `tasks/tf-apply-result.md`
 - Check partial state:
 
@@ -461,17 +464,20 @@ Once user confirms a replacement, **before any re-run**:
 1. **`designs/design.md`**:
    - Update the affected resource entry with the new spec
    - Append to **Decisions Log** (or create the section if missing):
+
      ```
      - {ISO timestamp}: RDS 实例规格 mysql.n2.small.1 → mysql.n2e.small.1
        原因：原规格在 cn-beijing-i 已下线（apply 时报 InvalidDBInstanceClass.Offline）
        影响：1C2G/同价位，无性能/成本变化
      ```
+
 2. **`designs/terraform/*.tf`**:
    - Replace the failing field value(s); only edit the lines required
    - Do NOT reformat unrelated code; keep the diff minimal so the
      change is auditable
 
 This is Rule 10. Skipping either file silently breaks Day-2:
+
 - Skip design.md → next Day-2 planning reads stale design and "fixes"
   the difference back to the broken spec
 - Skip .tf → next plan still fails the same way
@@ -491,6 +497,7 @@ the failed 4 + any that depend on them are created. Apply auto-flows
 per Rule 2.
 
 If the user picked **"暂停 — 我自己来查"** in Step 3:
+
 - Leave `status: "executing"` (do NOT roll back to `validated`)
 - Leave TODO task 3 `in_progress`
 - Tell user how to resume: "已保留 state_id `{STATE_ID}` 和已创建的 17 个资源。手动定夺规格后回到本会话回复"继续 apply"，我会用更新后的 HCL 在同一 state 上 resume。"
@@ -580,6 +587,7 @@ user later wants to redeploy fresh (new state), planning will detect
 | `--state-id` | yes | string | State ID returned by the preceding Plan / Apply / Destroy call |
 
 **⚠️ NEVER:**
+
 - Use `file://` paths (MCP cannot access local filesystem)
 - Use `$(cat ...)` shell substitution (MCP doesn't support shell operators)
 - Use Bash tool to run `aliyun` commands (always use MCP)

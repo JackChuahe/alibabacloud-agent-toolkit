@@ -24,6 +24,7 @@ metadata:
 > **PREREQUISITE CHECK** (internal — do not expose these checks to user)
 >
 > Before proceeding, verify:
+>
 > - `tasks/status.json` exists with `status: "plans-written"`
 > - `designs/terraform/` contains generated .tf files
 >
@@ -34,6 +35,7 @@ metadata:
 ## Triggers
 
 Activate when:
+
 - Writing-plans phase is complete
 - User explicitly asks to validate Terraform code
 - User asks for code review of infrastructure code
@@ -113,6 +115,7 @@ Agent call 2 - Code Quality Review:
 ```
 
 **Key points:**
+
 - Both calls go in the SAME message so they execute in **parallel**
 - Each subagent receives ALL necessary context in its prompt (files content inline)
 - Each subagent produces an independent review result
@@ -184,8 +187,8 @@ Write to `.aliyun-ai-ops-spec/{name}/tasks/validation-report.md`:
 > 回复 **\"部署\"** / **\"yes\"** → 进入 `alibabacloud-spec-ops:alibabacloud-executing-plans`，自动完成 plan + apply。
 > 想再调整代码或暂停？直接告诉我，或随时打断我（Esc / 中止当前消息）。"
 
-4. **Wait for explicit user approval.** This is the last user gate before money gets spent — never skip.
-5. **When the user confirms:**
+1. **Wait for explicit user approval.** This is the last user gate before money gets spent — never skip.
+2. **When the user confirms:**
    - Update `TodoWrite`: mark **"部署执行：terraform plan/apply via IaC Service"** → `in_progress`
    - Invoke `alibabacloud-spec-ops:alibabacloud-executing-plans`
 

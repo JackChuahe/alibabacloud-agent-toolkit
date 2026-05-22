@@ -29,11 +29,13 @@
 ## Permission Level Probing Reference
 
 The following ErrorCodes indicate **the identity has permission but the parameter or resource has an issue** — they do not indicate insufficient permission. Encountering these codes during probing means the permission exists at that level:
+
 - `InvalidParameter`, `MissingParameter`
 - `EntityNotExist`, `EntityNotExists`
 - `NotFound`, `ResourceNotFound`
 - `InvalidInput`
 
 The following ErrorCodes explicitly indicate **insufficient permission** — stop probing and record the level upon encountering them:
+
 - `NoPermission`, `Forbidden`, `AccessDenied`
 - `Forbidden.RAM`, `Forbidden.NotSupportRAM`

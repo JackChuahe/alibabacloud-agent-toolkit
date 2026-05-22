@@ -115,6 +115,7 @@ Before generating recommendations in Step 3:
 **Missing Action / own policy Deny**: Proceed to Step 3 recommendations → Step 4 repair.
 
 **Role trust policy not allowing caller** (PolicyType=AssumeRolePolicy or medium-confidence sts:AssumeRole):
+
 - Explain: trust policy of the target role must be updated to add the caller's ARN to Principal
 - If role name is known: provide modification command directly (see `references/ram-cli-commands.md` → Trust Policy section)
 - If unknown: provide `aliyun ram list-roles` and a template for the user to fill in
@@ -122,12 +123,14 @@ Before generating recommendations in Step 3:
 - For medium-confidence: describe both possible root causes and guide user to verify first
 
 **STS credential insufficient**:
+
 - Explain: using STS temporary credential; missing permission must be added to the Role that generated the STS
 - Provide Role name (from PrincipalARN) and suggested actions; do not auto-repair
 
 **STS token expired**: Prompt user to re-obtain STS token; provide renewal command.
 
 **SLR missing**: Provide creation command:
+
 ```bash
 aliyun resourcemanager create-service-linked-role --service-name <service>.aliyuncs.com
 ```

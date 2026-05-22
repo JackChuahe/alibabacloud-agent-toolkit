@@ -18,24 +18,29 @@ compatibility:
 
 ## Installation
 
-**Pre-check: Aliyun CLI >= 3.3.3 required**
+### Pre-check: Aliyun CLI >= 3.3.3 required
+
 > Run `aliyun version` to verify >= 3.3.3. If not installed or version too low,
 > run `curl -fsSL https://aliyuncli.alicdn.com/setup.sh | bash` to update,
 > or see `references/cli-installation-guide.md` for installation instructions.
 
-**Pre-check: Aliyun CLI plugin update required**
+### Pre-check: Aliyun CLI plugin update required
+
 > [MUST] run `aliyun configure set --auto-plugin-install true` to enable automatic plugin installation.
 > [MUST] run `aliyun plugin update` to ensure that any existing plugins are always up-to-date.
 
 At the **start** of the Core Workflow (before any CLI invocation):
 **[MUST] Enable AI-Mode** — AI-mode is required for Agent Skill execution.
 Run the following commands before any CLI invocation:
+
 ```bash
 aliyun configure ai-mode enable
 aliyun configure ai-mode set-user-agent --user-agent "AlibabaCloud-Agent-Skills/alibabacloud-ram-permission-diagnose"
 ```
+
 **[MUST] Disable AI-Mode at EVERY exit point** — Before delivering the final response for ANY reason, always disable AI-mode first. This applies to ALL exit paths: workflow success, workflow failure, error/exception, user cancellation, session end, or any other scenario where no further CLI commands will be executed.
 AI-mode is only used for Agent Skill invocation scenarios and MUST NOT remain enabled after the skill stops running.
+
 ```bash
 aliyun configure ai-mode disable
 ```
@@ -116,6 +121,7 @@ If the call returns `EntityNotExist`, re-run the original failing command and sa
 If `SubUser` identity needs UserName resolution before gap analysis, see `references/diagnose-flow.md` → Identity Resolution. If resolution fails, mark as L0 and continue.
 
 Root cause categories:
+
 - **MissingAction** — identity policy lacks the required Action (most common)
 - **ExplicitDeny** — a Deny statement blocks access (may be identity policy or CP control policy)
 - **TrustPolicy** — role trust policy does not allow the caller to assume the role
@@ -137,6 +143,7 @@ For gap analysis trigger rules and per-root-cause handling details, see `referen
 Before generating, check for caller skill permission hints (see `references/diagnose-flow.md` → Coverage Check).
 
 Knowledge source priority:
+
 1. **Built-in knowledge** — for popular services (ECS, OSS, RDS, FC, SLB, VPC, SLS, STS, etc.), use known Action semantics directly. Reference `references/hot-services-ram.md`.
 2. **Caller skill hints** — if `ram-policies.md` was found, use as supplementary context
 3. **Web search** — search `{product} RAM authorization site:help.aliyun.com`; prefer manually maintained docs with business examples over auto-generated Action tables

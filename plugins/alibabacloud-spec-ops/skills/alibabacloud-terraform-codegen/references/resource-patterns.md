@@ -161,6 +161,7 @@ attribute on `alicloud_fcv3_function` accepts either
 — both resolve correctly.
 
 Note on deprecated fields on `alicloud_ram_role`:
+
 - `name` → use `role_name` instead (see `deprecated-fields.md`)
 - `document` → use `assume_role_policy_document` instead
 

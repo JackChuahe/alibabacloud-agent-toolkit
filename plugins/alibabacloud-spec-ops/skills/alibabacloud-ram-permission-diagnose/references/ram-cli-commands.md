@@ -21,6 +21,7 @@ aliyun ram decode-diagnostic-message \
 ```
 
 ### Query Current Identity
+
 ```bash
 aliyun ram get-user
 ```
@@ -35,16 +36,19 @@ aliyun ims get-user --user-id <UserId>
 ```
 
 ### List Policies Attached to a User
+
 ```bash
 aliyun ram list-policies-for-user --user-name <username>
 ```
 
 ### List Policies Attached to a Role
+
 ```bash
 aliyun ram list-policies-for-role --role-name <rolename>
 ```
 
 ### Read Policy Content (get current version document)
+
 ```bash
 # First get the policy default version
 aliyun ram get-policy --policy-name <policy-name> --policy-type Custom
@@ -57,6 +61,7 @@ aliyun ram get-policy-version \
 ```
 
 ### List Policy Versions
+
 ```bash
 aliyun ram list-policy-versions \
   --policy-name <policy-name> \
@@ -68,6 +73,7 @@ aliyun ram list-policy-versions \
 ## System Policy Repair Commands
 
 ### Attach System Policy to a RAM User
+
 ```bash
 aliyun ram attach-policy-to-user \
   --policy-name <system-policy-name> \
@@ -76,6 +82,7 @@ aliyun ram attach-policy-to-user \
 ```
 
 ### Attach System Policy to a RAM Role
+
 ```bash
 aliyun ram attach-policy-to-role \
   --policy-name <system-policy-name> \
@@ -84,6 +91,7 @@ aliyun ram attach-policy-to-role \
 ```
 
 ### Detach System Policy
+
 ```bash
 # Detach from user
 aliyun ram detach-policy-from-user \
@@ -103,6 +111,7 @@ aliyun ram detach-policy-from-role \
 ## Custom Policy Repair Commands
 
 ### Create Custom Policy (first time)
+
 ```bash
 aliyun ram create-policy \
   --policy-name <policy-name> \
@@ -110,6 +119,7 @@ aliyun ram create-policy \
 ```
 
 ### Attach Custom Policy to a User
+
 ```bash
 aliyun ram attach-policy-to-user \
   --policy-name <policy-name> \
@@ -118,6 +128,7 @@ aliyun ram attach-policy-to-user \
 ```
 
 ### Attach Custom Policy to a Role
+
 ```bash
 aliyun ram attach-policy-to-role \
   --policy-name <policy-name> \
@@ -126,6 +137,7 @@ aliyun ram attach-policy-to-role \
 ```
 
 ### Append New Actions (update policy version)
+
 ```bash
 # Step 1: Get current policy content (check version first)
 aliyun ram get-policy --policy-name <policy-name> --policy-type Custom
@@ -150,6 +162,7 @@ aliyun ram create-policy-version \
 ```
 
 ### Detach Custom Policy
+
 ```bash
 # Detach from user
 aliyun ram detach-policy-from-user \
@@ -165,6 +178,7 @@ aliyun ram detach-policy-from-role \
 ```
 
 ### Delete Custom Policy (all versions + the policy itself)
+
 ```bash
 # First delete all non-default versions
 aliyun ram delete-policy-version --policy-name <policy-name> --version-id v1
@@ -197,6 +211,7 @@ aliyun ram update-role \
 ```
 
 If caller identity policy also lacks `sts:AssumeRole`, attach the system policy:
+
 ```bash
 aliyun ram attach-policy-to-user \
   --policy-name AliyunSTSAssumeRoleAccess \
@@ -211,6 +226,7 @@ aliyun ram detach-policy-from-user \
 ```
 
 If role name is unknown, list roles first:
+
 ```bash
 aliyun ram list-roles
 ```

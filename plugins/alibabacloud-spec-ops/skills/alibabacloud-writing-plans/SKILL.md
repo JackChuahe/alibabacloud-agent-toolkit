@@ -19,6 +19,7 @@ metadata:
 > **PREREQUISITE CHECK** (internal — do not expose these checks to user)
 >
 > Before proceeding, verify:
+>
 > - `tasks/status.json` exists with `status: "designed"`
 > - `designs/design.md` exists with approved design
 >
@@ -29,6 +30,7 @@ metadata:
 ## Triggers
 
 Activate when:
+
 - Planning phase is complete and user wants to generate code
 - User explicitly asks for Terraform code generation
 - Auto-prompted after alibabacloud-spec-ops:alibabacloud-planning completes
@@ -81,6 +83,7 @@ with what's happening.
 ### Step 1: Load Design
 
 Read `.aliyun-ai-ops-spec/{name}/designs/design.md` and extract:
+
 - Resource list with specifications
 - Network topology
 - Security requirements
@@ -105,6 +108,7 @@ Resources to generate:
 **CRITICAL: You MUST invoke the `Skill` tool with `alibabacloud-spec-ops:alibabacloud-terraform-codegen` here.**
 
 The terraform-codegen skill will:
+
 1. Query IaCService for supported products and resource type schemas
 2. Consult Alibaba Cloud documentation for correct attribute names and values
 3. Generate production-quality HCL with proper data sources, variables, and outputs
@@ -113,6 +117,7 @@ The terraform-codegen skill will:
 **How to invoke:**
 
 Use the `Skill` tool:
+
 ```
 Skill:
   skill: "alibabacloud-spec-ops:alibabacloud-terraform-codegen"
@@ -125,6 +130,7 @@ Then provide the terraform-codegen skill with a clear instruction based on the d
 > [paste the structured resource manifest from Step 1]
 >
 > Requirements:
+>
 > - Region: {region from design}
 > - Resources: {list all resources with specs}
 > - Network: {VPC/subnet topology}
@@ -144,6 +150,7 @@ After terraform-codegen produces the HCL, write **ALL** code into a single `main
 ```
 
 **MANDATORY rules:**
+
 - All Terraform code MUST live in one `main.tf` — never split into variables.tf, outputs.tf, locals.tf, etc.
 - Internal ordering: `terraform {}` → `provider` → `variables` → `locals` → `data sources` → `resources` → `outputs`
 - Every `variable` MUST have a `default` value — ensures zero-input deployment without failure
@@ -164,6 +171,7 @@ aliyun <service> <operation> --<args>
 ```
 
 **When to use CLI scripts (instead of Terraform):**
+
 - One-time setup operations (e.g., enable a service)
 - Operations with no Terraform resource support
 - Verification commands (e.g., check DNS propagation)
@@ -206,9 +214,10 @@ The `terraform-codegen` skill provides capabilities that inline generation canno
 >
 > Now running review (spec compliance + code quality)..."
 
-3. **Immediately and automatically invoke `alibabacloud-spec-ops:alibabacloud-validate`** — do NOT stop to ask the user. Validation is read-only (no cloud changes, no cost) and the next user-facing decision is whether to deploy, which `alibabacloud-validate` itself gates.
+1. **Immediately and automatically invoke `alibabacloud-spec-ops:alibabacloud-validate`** — do NOT stop to ask the user. Validation is read-only (no cloud changes, no cost) and the next user-facing decision is whether to deploy, which `alibabacloud-validate` itself gates.
 
 **Do NOT:**
+
 - Ask "Would you like to proceed with validation?" — validation is not a decision the user needs to make
 - Mention status.json updates
 - Mention internal file paths for state tracking

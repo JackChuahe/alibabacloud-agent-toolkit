@@ -29,6 +29,7 @@ provider "alicloud" {
 | `locals.tf` | Local values and computed expressions |
 
 For larger projects, split by resource group:
+
 - `network.tf` — VPC, VSwitches, Security Groups
 - `compute.tf` — ECS, ESS
 - `database.tf` — RDS, Redis
@@ -38,6 +39,7 @@ For larger projects, split by resource group:
 ## Naming Conventions
 
 ### Resources
+
 ```hcl
 resource "alicloud_instance" "web_server" {
   instance_name = "${var.project}-${var.environment}-web-${count.index + 1}"
@@ -46,6 +48,7 @@ resource "alicloud_instance" "web_server" {
 ```
 
 ### Variables
+
 ```hcl
 variable "instance_type" {
   description = "ECS instance type for web servers"
@@ -55,6 +58,7 @@ variable "instance_type" {
 ```
 
 ### Tags
+
 ```hcl
 locals {
   common_tags = {
@@ -92,6 +96,7 @@ data "alicloud_instance_types" "default" {
 ## Resource Patterns
 
 ### VPC + VSwitch + Security Group (Baseline)
+
 ```hcl
 resource "alicloud_vpc" "main" {
   vpc_name   = "${var.project}-${var.environment}-vpc"
@@ -115,6 +120,7 @@ resource "alicloud_security_group" "default" {
 ```
 
 ### ECS Instance
+
 ```hcl
 resource "alicloud_instance" "web" {
   count                      = var.instance_count
@@ -131,6 +137,7 @@ resource "alicloud_instance" "web" {
 ```
 
 ### RDS Instance
+
 ```hcl
 resource "alicloud_db_instance" "main" {
   engine               = "MySQL"

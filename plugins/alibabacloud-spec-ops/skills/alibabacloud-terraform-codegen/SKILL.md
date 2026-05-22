@@ -127,7 +127,7 @@ Three outcomes:
 
 - **Row found, status column empty** → note the `[doc](<url>)` from the row;
   proceed to 4.2.
-- **Row found, status `⚠️ 弃用 → `<new_name>`** → switch the plan to
+- **Row found, status `⚠️ 弃用 →`<new_name>`** → switch the plan to
   `<new_name>` and re-lookup. NEVER emit the deprecated name. Common catch:
   `alicloud_fc_function` → `alicloud_fcv3_function`.
 - **Row not found** → stop. Ask the user whether the name was a typo;
@@ -302,10 +302,10 @@ just wrote. For every resource in this generation, grep the project against
 
 - **rename** row → if the old field name appears in HCL you just wrote,
   replace it with the new field name. Examples that show up most often:
-    - `alicloud_ram_role`: `name` → `role_name`,
+  - `alicloud_ram_role`: `name` → `role_name`,
       `document` → `assume_role_policy_document`
-    - `alicloud_security_group`: `name` → `security_group_name`
-    - `alicloud_db_database`: `name` → `data_base_name`
+  - `alicloud_security_group`: `name` → `security_group_name`
+  - `alicloud_db_database`: `name` → `data_base_name`
 - **split / soft-split** row → do NOT write the inline field on the parent.
   Declare the replacement sub-resource only when the user's requirement
   needs that capability, or when `references/resource-patterns.md` says the
@@ -461,6 +461,7 @@ what actually happened in Step 6. Do NOT paraphrase or fold it into prose:
 - `Validation: FAILED (<diagnostic excerpt>)` — after 3 retries hit the cap
 
 Edge cases:
+
 - MCP CallCLI returns an auth error → `Validation: SKIPPED (iacservice validate-module unavailable — auth)`
 - MCP CallCLI times out → `Validation: SKIPPED (iacservice validate-module unavailable — timeout)`
 - IaCService returns 5xx → `Validation: FAILED (iacservice 5xx: <message>)`
@@ -548,6 +549,6 @@ through the MCP CallCLI tool.
 
 The local catalog is one markdown table row per `alicloud_*` resource and
 data source, with a `[doc](<url>)` cell and, for deprecated entries, a
-`⚠️ 弃用 → `<new_name>`` marker. It is generated from the upstream provider
+`⚠️ 弃用 →`<new_name>`` marker. It is generated from the upstream provider
 repo by `scripts/build_alicloud_providers.py`; re-run that script when a new
 `aliyun/alicloud` release introduces or shifts deprecations.

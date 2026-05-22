@@ -32,6 +32,7 @@ All artifacts for a single infrastructure requirement are stored under `.aliyun-
 ## Naming Convention for Requirements
 
 Use kebab-case derived from the requirement:
+
 - "I need an ECS server" → `ecs-server`
 - "Setup a web application with RDS" → `web-app-with-rds`
 - "Create VPC network for production" → `production-vpc-network`
