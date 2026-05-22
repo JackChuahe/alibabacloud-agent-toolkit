@@ -4,7 +4,7 @@ description: "Act as an Alibaba Cloud expert to help users clarify requirements,
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.5.0"
+  version: "0.5.1"
 ---
 
 # Alibaba Cloud Planning
@@ -472,13 +472,17 @@ Generate the HTML and display it directly, then present resource list for final 
 > - 性能 ✅ cloud_essd 满足 IOPS、QPS < 100 无瓶颈
 > - 成本 ✅ 按量付费、最小可用规格
 >
-> **确认这个方案？** 确认后我直接生成 Terraform 代码。
+> **确认这个方案，还是想再一起讨论一下需求和架构设计？**
+>
+> 回复 **"确认"** 后，我将进入 `alibabacloud-spec-ops:alibabacloud-writing-plans` 阶段，把设计落盘为 `design.md` 并生成 Terraform 代码。
+>
+> 如果想调整，直接告诉我要改的地方（地域、规格、高可用、成本上限、合规要求……），我们继续迭代直到你满意。
 
 **Format rules for this step:**
 - Architecture visualization is **HTML**，生成后直接展示（部分 Agent 客户端支持内联渲染 HTML）
 - Resource list is a **numbered table** with all resources, specs, and costs
 - Four-pillar summary is a **one-line-per-pillar** quick assessment
-- This is the ONLY confirmation gate — user says "确认" → proceed to code generation
+- This is the ONLY confirmation gate — user says "确认" → proceed to code generation; anything else → treat as iteration request, refine and re-present
 
 #### Step 4: Confirm → Auto Code Generation
 
@@ -917,7 +921,16 @@ After the call returns, tell the user explicitly:
 ### Phase 5: Confirm & Persist
 
 1. Present complete design summary
-2. Wait for explicit user approval
+2. Ask for explicit user approval — use this exact prompt style (do NOT improvise terse questions like "确认这个方案？"):
+
+   > "**确认这个方案，还是想再一起讨论一下需求和架构设计？**
+   >
+   > 回复 **\"确认\"** 后，我将进入 `alibabacloud-spec-ops:alibabacloud-writing-plans` 阶段，把设计落盘为 `design.md` 并生成 Terraform 代码。
+   >
+   > 如果想调整，直接告诉我要改的地方（地域、规格、HA 策略、成本上限、合规要求……），我们继续迭代直到你满意。"
+
+   Treat anything other than an explicit "确认" / "confirm" / "ok 进入下一步" as an iteration request — refine the design and re-present, do not auto-advance.
+
 3. Create state directory and write design artifacts (silently, no need to announce file operations):
 
 ```
