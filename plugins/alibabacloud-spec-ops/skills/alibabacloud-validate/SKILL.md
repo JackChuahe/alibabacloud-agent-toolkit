@@ -4,7 +4,7 @@ description: "Validate generated Terraform code against design requirements and 
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.3.0"
+  version: "0.4.1"
 ---
 
 # Alibaba Cloud Validate
@@ -168,7 +168,8 @@ Write to `.aliyun-ai-ops-spec/{name}/tasks/validation-report.md`:
 ## After Validation Passes
 
 1. Silently update `tasks/status.json` to `status: "validated"` — **do NOT mention this to the user**
-2. Inform user:
+2. Update the user-facing TODO list via `TodoWrite`: mark **"双轨评审：spec compliance + code quality"** → `completed`. (Leave **"部署执行"** as `pending` — only the user can promote it to `in_progress` by confirming.)
+3. Inform user and ask for execution approval (this is the **execution gate** — keep it):
 
 > "Validation complete — all checks passed.
 >
@@ -176,11 +177,19 @@ Write to `.aliyun-ai-ops-spec/{name}/tasks/validation-report.md`:
 > - Code quality: ✅
 > - Remote syntax: ✅ (validated upstream by terraform-codegen)
 >
-> **Next step:** When you're ready, I can execute the Terraform plan to create the infrastructure.
+> **下一步：要现在进入部署吗？**
 >
-> ⚠️ Execution will create real cloud resources and incur costs. Proceed when ready."
+> 部署会通过 IaC Service 远程**自动**执行 `terraform plan` 与 `apply`——回复一次 \"部署\" 即授权整条链路完成，**真正在云上创建资源并产生费用**。我会把 plan 结果展示给你，但不会再停下来二次确认；如果 plan 出现非预期的破坏性变更（例如 Day-2 中要 destroy 资源），我会主动停下来询问。
+>
+> 回复 **\"部署\"** / **\"yes\"** → 进入 `alibabacloud-spec-ops:alibabacloud-executing-plans`，自动完成 plan + apply。
+> 想再调整代码或暂停？直接告诉我，或随时打断我（Esc / 中止当前消息）。"
 
-**IMPORTANT:** Do NOT automatically invoke executing-plans. This requires explicit user confirmation.
+4. **Wait for explicit user approval.** This is the last user gate before money gets spent — never skip.
+5. **When the user confirms:**
+   - Update `TodoWrite`: mark **"部署执行：terraform plan/apply via IaC Service"** → `in_progress`
+   - Invoke `alibabacloud-spec-ops:alibabacloud-executing-plans`
+
+**IMPORTANT:** Do NOT automatically invoke executing-plans without explicit user confirmation. The previous step in the workflow (writing-plans → validate) is read-only and auto-chains; this step is where the workflow stops to ask, by design.
 
 ---
 

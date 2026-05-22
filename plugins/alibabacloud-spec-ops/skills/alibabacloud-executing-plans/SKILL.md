@@ -4,7 +4,7 @@ description: "Execute validated Terraform plans via Alibaba Cloud IaC Service. R
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.4.0"
+  version: "0.6.0"
 ---
 
 # Alibaba Cloud Executing Plans
@@ -41,8 +41,8 @@ Activate when:
 
 ## Rules
 
-1. **User confirmation required** — Never execute without explicit user approval
-2. **Plan before apply** — Always run terraform plan first, show results, get confirmation
+1. **Single deploy approval, granted upstream** — The user authorizes deployment ONCE in `alibabacloud-validate`'s gate. Inside this skill the entire `plan → apply` chain runs automatically. Never add a second confirmation between plan and apply.
+2. **Plan before apply, results always shown** — Always run terraform plan first AND surface its output to the user before apply. The user can interrupt mid-stream if the plan reveals something unexpected, but the default flow does not stop to ask.
 3. **MCP only** — ALL `aliyun` CLI commands MUST go through `AlibabaCloud___CallCLI`, never through Bash
 4. **Inline content** — Read .tf files locally, then pass content as string to `--code` (MCP cannot access local files)
 5. **Record everything** — All outputs recorded to tasks/
@@ -197,15 +197,16 @@ AlibabaCloud___CallCLI:
   command: "aliyun iacservice get-execute-state --state-id {STATE_ID}"
 ```
 
-### Step 4: Present Plan Results
+### Step 4: Present Plan Results (no second confirmation)
 
-Show the plan output to user:
-- Resources to be created/modified/destroyed
-- Any potential issues or warnings
+Show the plan output to user, then **proceed directly to Step 5** —
+do NOT stop to ask "Confirm apply?". The user already authorized
+deployment at the validate-stage gate; a second confirmation here is
+friction that this skill explicitly removes.
 
 Write plan results to `tasks/tf-plan-result.md`.
 
-Ask for explicit confirmation:
+Display:
 
 > "Terraform plan results:
 >
@@ -215,15 +216,25 @@ Ask for explicit confirmation:
 >
 > {Summary of key resources}
 >
-> ⚠️ This will create real resources and incur costs.
-> Confirm apply? (yes/no)"
+> 即将自动进入 apply 阶段。如发现 plan 不符合预期，请立刻中断我（例如按 Esc / 中止当前消息）。"
 
-**STOP and wait for user confirmation.** Do NOT proceed without explicit "yes".
+If the plan output reveals something the user clearly did not consent to
+(e.g. unexpected resource destruction in a Day-2 modify when no destroy
+was discussed), STOP and surface it as a question — this is a safety
+override, not the default flow:
 
-### Step 5: Execute Terraform Apply
+> "⚠️ plan 中检测到非预期的破坏性变更：
+> - `<resource>` 将被 destroy/replace
+>
+> 这通常不在变更范围内，是否确认继续？回复 **\"继续\"** 才会 apply；回复 **\"停\"** 我立刻中止。"
 
-Only after user confirms. Reuse `{STATE_ID}` (saved in Step 3) and a
-**fresh** `--client-token` (different UUID from the plan call):
+Default path (no anomalies): emit the display block, then immediately
+invoke Step 5 in the same turn.
+
+### Step 5: Execute Terraform Apply (auto, immediately after Step 4)
+
+Reuse `{STATE_ID}` (saved in Step 3) and a **fresh** `--client-token`
+(different UUID from the plan call):
 
 ```
 AlibabaCloud___CallCLI:
@@ -275,27 +286,37 @@ SUCCESS / FAILED
 {error details}
 ```
 
-### Step 7: Update Internal State
+### Step 7: Update Internal State + TODO list
 
-Silently update `tasks/status.json`. **Do NOT mention this file to the user.**
+1. Silently update `tasks/status.json`. **Do NOT mention this file to the user.**
 
-```json
-{
-  ...,
-  "status": "executed",
-  "updated_at": "{ISO timestamp}",
-  "state": {
-    "state_id": "{STATE_ID}",
-    "last_plan_at": "{from Step 3}",
-    "last_apply_at": "{ISO timestamp of successful apply}",
-    "last_destroy_at": null
-  }
-}
-```
+   ```json
+   {
+     ...,
+     "status": "executed",
+     "updated_at": "{ISO timestamp}",
+     "state": {
+       "state_id": "{STATE_ID}",
+       "last_plan_at": "{from Step 3}",
+       "last_apply_at": "{ISO timestamp of successful apply}",
+       "last_destroy_at": null
+     }
+   }
+   ```
 
-`state.state_id` MUST be retained even on Day-2 transitions (do not clear
-it between iterations). Subsequent `executing-plans` invocations will read
-it back in Step 1 to continue on the same remote state.
+   `state.state_id` MUST be retained even on Day-2 transitions (do not clear
+   it between iterations). Subsequent `executing-plans` invocations will read
+   it back in Step 1 to continue on the same remote state.
+
+2. Update the user-facing TODO list via `TodoWrite`: mark
+   **"部署执行：terraform plan/apply via IaC Service"** → `completed`.
+   This closes the 3-task scaffold the planning skill rendered after
+   design confirmation, giving the user a clean "everything done" view.
+
+   On apply failure or destroy: leave the task in `in_progress` so the
+   user understands the workflow has not finished; mark `completed`
+   only after the resource state is reconciled (retry succeeded, partial
+   destroy completed, or user explicitly abandons).
 
 ---
 
@@ -452,9 +473,9 @@ user later wants to redeploy fresh (new state), planning will detect
 
 ## Safety Principles
 
-- **Never skip plan** — Always plan before apply
-- **Never auto-apply** — Always require user confirmation
-- **Never silent destroy** — Destroy requires explicit naming confirmation
+- **Never skip plan** — Always plan before apply, and always show plan output to the user
+- **Auto-apply is the default flow** — The deploy authorization is granted ONCE at the validate-stage gate; do NOT add a second confirmation between plan and apply. The user can still interrupt mid-stream; the safety override in Step 4 covers unexpected destructive changes.
+- **Never silent destroy** — Destroy (Rule 8) requires explicit naming confirmation; this is independent of the plan→apply auto-flow
 - **Always use MCP** — Never run aliyun CLI via Bash; always via `AlibabaCloud___CallCLI`
 - **Always inline content** — Read files first, pass content as string to MCP
 - **Always record** — Every operation logged to tasks/

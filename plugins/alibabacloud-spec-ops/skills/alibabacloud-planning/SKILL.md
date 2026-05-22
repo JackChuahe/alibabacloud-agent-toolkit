@@ -4,7 +4,7 @@ description: "Act as an Alibaba Cloud expert to help users clarify requirements,
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.5.1"
+  version: "0.6.0"
 ---
 
 # Alibaba Cloud Planning
@@ -484,9 +484,13 @@ Generate the HTML and display it directly, then present resource list for final 
 - Four-pillar summary is a **one-line-per-pillar** quick assessment
 - This is the ONLY confirmation gate — user says "确认" → proceed to code generation; anything else → treat as iteration request, refine and re-present
 
-#### Step 4: Confirm → Auto Code Generation
+#### Step 4: Confirm → Render TODO list → Auto Code Generation
 
-User confirms → silently write internal state → **immediately invoke `alibabacloud-spec-ops:alibabacloud-writing-plans`**
+When the user confirms:
+
+1. **Silently write internal state** (`tasks/status.json`)
+2. **Render the downstream TODO list** using `TodoWrite` so the user sees the remaining steps. See [TODO Task List](#todo-task-list-rendered-after-design-confirmation) below for the exact 3-task scaffold.
+3. **Immediately invoke `alibabacloud-spec-ops:alibabacloud-writing-plans`** — no user prompt needed
 
 **Fast Track skips:**
 - ❌ Per-pillar deep-dive exploration (Phase 2's multi-round dialog)
@@ -943,7 +947,8 @@ After the call returns, tell the user explicitly:
 
 4. Write `designs/design.md` (complete design document)
 5. Write `tasks/status.json` (status = "designed") — **do NOT mention this to the user**
-6. **Automatically invoke `alibabacloud-spec-ops:alibabacloud-writing-plans`** — seamless transition, no user prompt needed
+6. **Render the downstream TODO list** with `TodoWrite` so the user sees the 3 remaining steps. See [TODO Task List](#todo-task-list-rendered-after-design-confirmation) below for the exact scaffold.
+7. **Automatically invoke `alibabacloud-spec-ops:alibabacloud-writing-plans`** — seamless transition, no user prompt needed
 
 ---
 
@@ -1035,6 +1040,44 @@ See [`../alibabacloud-writing-plans/references/directory-structure.md` → Statu
 
 ---
 
+## TODO Task List (rendered after design confirmation)
+
+Once the user approves the design (Fast Track Step 4 / Full Mode Phase 5),
+render a 3-task list using `TodoWrite` so the user sees the remaining
+workflow at a glance and knows where the conversation is headed. This is
+the **canonical task scaffold** that every downstream skill keys off:
+
+```
+TodoWrite:
+  todos:
+    - subject: "生成 Terraform 代码"
+      activeForm: "生成 Terraform 代码"
+      description: "Invoke alibabacloud-writing-plans → alibabacloud-terraform-codegen to produce HCL + remote validate-module"
+      status: pending
+    - subject: "双轨评审：spec compliance + code quality"
+      activeForm: "并行评审 spec compliance 与 code quality"
+      description: "Invoke alibabacloud-validate to dispatch spec-reviewer + code-quality-reviewer subagents in parallel"
+      status: pending
+    - subject: "部署执行：terraform plan/apply via IaC Service"
+      activeForm: "通过 IaC Service 远程执行 plan 与 apply"
+      description: "Invoke alibabacloud-executing-plans (requires explicit user confirmation before apply)"
+      status: pending
+```
+
+**Ownership contract:**
+
+| Task | Marked `in_progress` by | Marked `completed` by |
+| --- | --- | --- |
+| 生成 Terraform 代码 | `alibabacloud-writing-plans` (start) | `alibabacloud-writing-plans` (after codegen succeeds) |
+| 双轨评审 | `alibabacloud-writing-plans` (immediately before auto-invoking validate) | `alibabacloud-validate` (after both reviewers PASS) |
+| 部署执行 | `alibabacloud-validate` (when user explicitly approves execution) | `alibabacloud-executing-plans` (after apply succeeds) |
+
+Each downstream skill `TodoWrite`-updates only its own task — never
+modifies tasks owned by others. This keeps the TODO list a faithful
+real-time mirror of the workflow's progress.
+
+---
+
 ## After Planning Completes
 
 Present the design summary and immediately proceed:
@@ -1048,13 +1091,20 @@ Present the design summary and immediately proceed:
 >
 > Now generating the implementation code..."
 
-**Then IMMEDIATELY invoke `alibabacloud-spec-ops:alibabacloud-writing-plans`** — this is a seamless transition. The user approved the design, code generation is the natural next step and does not require separate confirmation.
+**Then IMMEDIATELY:**
+1. Render the TODO list (see [TODO Task List](#todo-task-list-rendered-after-design-confirmation) above)
+2. Invoke `alibabacloud-spec-ops:alibabacloud-writing-plans`
+
+This is a seamless transition. The user approved the design, code
+generation is the natural next step and does not require separate
+confirmation.
 
 **Do NOT:**
 - Ask "Shall I proceed?"
 - Mention status.json updates
 - Show file paths for internal state files
 - Wait for user to manually invoke writing-plans
+- Skip the TodoWrite render — the user needs to see what's coming
 
 ---
 

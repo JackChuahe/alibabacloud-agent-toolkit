@@ -4,7 +4,7 @@ description: "Convert approved infrastructure designs into Terraform HCL code an
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # Alibaba Cloud Writing Plans
@@ -64,11 +64,19 @@ When `tasks/status.json` contains `"change_type": "modify"`:
 | Code generation | Same (terraform-codegen) | Same |
 | File organization | Single main.tf | Single main.tf |
 | User output | Minimal — just list generated files | Include schema verification details |
-| Next step prompt | "代码已生成，要执行验证吗？" | Same |
+| Next step | Auto-invoke `alibabacloud-validate` (no user prompt — validation is read-only and risk-free) | Same |
 
 ---
 
 ## Process
+
+### Step 0: Mark "生成 Terraform 代码" as `in_progress`
+
+The planning skill rendered a 3-task TODO list when the user confirmed
+the design. At the very start of this skill's run, update that list
+via `TodoWrite` to mark task **"生成 Terraform 代码"** as `in_progress`.
+Do this *before* loading the design — the user sees the spinner align
+with what's happening.
 
 ### Step 1: Load Design
 
@@ -185,7 +193,10 @@ The `terraform-codegen` skill provides capabilities that inline generation canno
 
 ## After Writing Plans
 
-Inform user of the result:
+1. Update the user-facing TODO list via `TodoWrite`:
+   - Mark **"生成 Terraform 代码"** → `completed`
+   - Mark **"双轨评审：spec compliance + code quality"** → `in_progress`
+2. Inform user of the result (one paragraph, no question):
 
 > "Terraform code generated successfully.
 >
@@ -193,15 +204,15 @@ Inform user of the result:
 >
 > Code was generated with resource schemas verified via IaCService API.
 >
-> **Next step:** Run validation to check requirement compliance and syntax correctness.
-> Would you like to proceed with validation?"
+> Now running review (spec compliance + code quality)..."
 
-Wait for user to confirm, then invoke `alibabacloud-spec-ops:alibabacloud-validate`.
+3. **Immediately and automatically invoke `alibabacloud-spec-ops:alibabacloud-validate`** — do NOT stop to ask the user. Validation is read-only (no cloud changes, no cost) and the next user-facing decision is whether to deploy, which `alibabacloud-validate` itself gates.
 
-**Do NOT mention:**
-- status.json updates
-- Internal file paths for state tracking
-- The terraform-codegen delegation details (implementation detail)
+**Do NOT:**
+- Ask "Would you like to proceed with validation?" — validation is not a decision the user needs to make
+- Mention status.json updates
+- Mention internal file paths for state tracking
+- Mention the terraform-codegen delegation details (implementation detail)
 
 ---
 
