@@ -4,7 +4,7 @@ description: "Convert approved infrastructure designs into Terraform HCL code an
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.3.0"
+  version: "0.4.0"
 ---
 
 # Alibaba Cloud Writing Plans
@@ -140,22 +140,26 @@ Then provide the terraform-codegen skill with a clear instruction based on the d
 > IMPORTANT: Output ALL code in a single main.tf file. Do NOT split into separate files.
 > File internal order: terraform {} → provider → variables → locals → data → resources → outputs"
 
-### Step 3: Write Generated Code to Single File
+### Step 3: Verify codegen output (codegen already wrote the file)
 
-After terraform-codegen produces the HCL, write **ALL** code into a single `main.tf`:
+`terraform-codegen` is the **producer** of the .tf file — it wrote
+`main.tf` itself during its Step 6 and reported `Files written: ...` in
+its Step 7 summary. Do NOT re-write or duplicate; this step is a
+smoke-check on the producer's output:
 
-```
-.aliyun-ai-ops-spec/{name}/designs/terraform/
-└── main.tf          # ALL code: terraform{}, provider, variables, locals, data, resources, outputs
-```
+- Confirm `.aliyun-ai-ops-spec/{name}/designs/terraform/main.tf` exists
+- Confirm codegen's Step 7 reported `Validation: iacservice validate-module: ok` (or accepted SKIPPED/FAILED with diagnostics)
+- Confirm single-file constraint: no `variables.tf` / `outputs.tf` / `locals.tf` sibling files
 
-**MANDATORY rules:**
+If any check fails, surface the issue to the user and stop — do NOT
+auto-chain to validate on broken codegen output.
 
-- All Terraform code MUST live in one `main.tf` — never split into variables.tf, outputs.tf, locals.tf, etc.
+**File contract that codegen enforces** (recap, for verification only):
+
+- All Terraform code in one `main.tf` — never split
 - Internal ordering: `terraform {}` → `provider` → `variables` → `locals` → `data sources` → `resources` → `outputs`
-- Every `variable` MUST have a `default` value — ensures zero-input deployment without failure
-- This applies regardless of code length or complexity
-- Reason: simplifies IaC Service remote execution (single template body) and guarantees deployability
+- Every `variable` has a `default` value
+- Reason: IaC Service remote execution takes a single template body
 
 ### Step 4: Generate CLI Scripts (if needed)
 
@@ -199,7 +203,13 @@ The `terraform-codegen` skill provides capabilities that inline generation canno
 
 ---
 
-## After Writing Plans
+## Continuation Contract — MANDATORY, execute IMMEDIATELY when Step 2's Skill call returns
+
+> **TRIGGER**: the moment the `Skill: alibabacloud-spec-ops:alibabacloud-terraform-codegen` call returns to your context. terraform-codegen's Step 7 summary (`Files written: …` + `Validation: …` + implementation notes) is **NOT a stopping point** — it is the cue to continue. Treating it as terminal and waiting for user input is a **bug** (this skill's most common regression).
+>
+> Execute Steps 3 → 4 → 5 → the items below, in that order, in the same turn, without pausing for user input. The auto-chain to `alibabacloud-validate` is mandatory and unconditional unless Step 3's smoke-check failed.
+
+After Step 3's smoke-check passes:
 
 1. Update the user-facing TODO list via `TodoWrite`:
    - Mark **"生成 Terraform 代码"** → `completed`
@@ -214,7 +224,7 @@ The `terraform-codegen` skill provides capabilities that inline generation canno
 >
 > Now running review (spec compliance + code quality)..."
 
-1. **Immediately and automatically invoke `alibabacloud-spec-ops:alibabacloud-validate`** — do NOT stop to ask the user. Validation is read-only (no cloud changes, no cost) and the next user-facing decision is whether to deploy, which `alibabacloud-validate` itself gates.
+1. **Immediately and automatically invoke `alibabacloud-spec-ops:alibabacloud-validate` via the `Skill` tool** — do NOT stop to ask the user. Validation is read-only (no cloud changes, no cost) and the next user-facing decision is whether to deploy, which `alibabacloud-validate` itself gates. **Emitting only the "Now running review…" paragraph without then invoking the Skill is the regression bug — the Skill call MUST happen in the same turn.**
 
 **Do NOT:**
 
@@ -222,6 +232,8 @@ The `terraform-codegen` skill provides capabilities that inline generation canno
 - Mention status.json updates
 - Mention internal file paths for state tracking
 - Mention the terraform-codegen delegation details (implementation detail)
+- Stop after printing the "Now running review…" paragraph — that paragraph is only a user-facing transition note; the actual `Skill` invocation must follow in the same turn
+- Treat any `※ recap:` or session-summary line that mentions "next step" as substitute action — it's commentary, not execution
 
 ---
 
