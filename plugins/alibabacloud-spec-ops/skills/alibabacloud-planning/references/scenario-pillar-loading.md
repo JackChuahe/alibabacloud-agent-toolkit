@@ -41,7 +41,7 @@ For each matched scenario:
 
 5. **Persist in design.md**: when the design is finalized, the matched
    scenarios + the advisor sections referenced must appear in the
-   `## Scenario Context` block of design.md so Day-2 sessions can pick
+   `## Scenario Context` block of design.md so future iteration sessions can pick
    up the prior context without re-detecting.
 
 ## Multiple-scenario handling

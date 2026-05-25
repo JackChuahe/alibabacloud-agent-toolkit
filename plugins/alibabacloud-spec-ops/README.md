@@ -15,7 +15,7 @@ Then you get:
 - 📝 **schema-verified Terraform** —— IaCService 实时校验，不胡编资源属性
 - ✅ **双独立 reviewer 并行评审** —— spec 满足度 + 代码质量，挡在执行之前
 - 🚀 **远程沙箱执行** —— IaC Service 帮你跑 plan + apply，一次授权一气呵成，全链路审计
-- ↻ **可持续迭代的设计 + 状态** —— `design.md` 和远程 `state_id` 跨会话保留，Day-2 一句"升配 RDS"就在原有基础上做增量，不重建已有资源
+- ↻ **可持续迭代的设计 + 状态** —— `design.md` 和远程 `state_id` 跨会话保留，迭代时一句"升配 RDS"就在原有基础上做增量，不重建已有资源
 
 ## Workflow at a Glance
 
@@ -81,7 +81,7 @@ writing-plans → terraform-codegen → validate (spec + quality reviewers in pa
 
 After validation passes, the plugin asks once whether to deploy. Reply **"部署"** (or `yes`). Then `terraform plan` + `apply` run **automatically** through Alibaba Cloud IaC Service — sandboxed, with a full audit trace. You can still interrupt mid-stream if `plan` output reveals anything unexpected; spec-driven failures (e.g. a SKU offline in the target AZ) automatically stop and ask you for a replacement.
 
-### 6. Iterate (Day-2)
+### 6. Iterate (迭代)
 
 Need to scale up or add a service later? Just say it:
 
@@ -125,12 +125,12 @@ The plugin auto-detects the modification intent, loads the previous `design.md`,
 
 - 用户在 Validate 出口**一次性授权**整条 plan + apply 链路
 - 自动展示 `terraform plan` 变更详情，但**不再二次拦截**
-- 若 plan 出现非预期破坏性变更（典型 Day-2 中误删资源），主动停下来询问
+- 若 plan 出现非预期破坏性变更（典型 迭代中误删资源），主动停下来询问
 - **Destroy 必须二次确认**（输入项目名才执行）
 
 每一步操作均有完整审计记录和可追溯 Trace。
 
-### ↻ Day-2 — 持续维护与增量迭代
+### ↻ 迭代 — 持续维护与增量迭代
 
 基础设施不是一次性交付，而是持续演进。当用户说"升配 / 扩容 / 加 Redis"，spec-ops 自动检测变更意图并扫描 `.aliyun-ai-ops-spec/` 已有项目，**先读全原 `design.md` 内化原设计意图**，再加载现有 Terraform 代码和执行历史作为上下文。变更对话以"在已有架构基础上做 delta"的方式进行 —— 只改需要变的部分。然后走同一条 Plan → Code → Validate → Execute 流水线，**复用远程 `state_id`**，在原有资源状态上做增量 plan/apply，不重建已有资源。
 
@@ -157,7 +157,7 @@ Validate 是出口关卡 —— 确保执行前内容质量达标。
 | 手动 CLI 复制粘贴 —— 无审计追踪 | MCP 远程沙箱执行 —— 零本地风险，全链路审计 |
 | 无成本感知 —— 账单惊喜 | 每个决策点都有实时费用估算 |
 | 无可观测性 —— 黑盒操作，出问题无从追溯 | 全链路可观测 —— 每次调用的耗时、状态、结果均可追溯 |
-| Day-2 变更 —— 每次都从头开始 | Day-2 持续迭代 —— 加载上下文，增量变更，同一条流水线 |
+| 迭代变更 —— 每次都从头开始 | 持续迭代 —— 加载上下文，增量变更，同一条流水线 |
 
 ## State Directory
 
@@ -170,7 +170,7 @@ All artifacts live under `.aliyun-ai-ops-spec/{requirement-name}/`:
 │   ├── architecture.html      # Optional visual diagram
 │   └── terraform/             # Generated HCL
 └── tasks/
-    ├── status.json            # Pipeline state + state_id for Day-2
+    ├── status.json            # Pipeline state + state_id for 迭代
     ├── validation-report.md
     ├── tf-plan-result.md
     └── tf-apply-result.md
@@ -221,7 +221,7 @@ The server is named distinctly from `alibabacloud-core` to avoid namespace colli
 
 | Skill | Description |
 |-------|-------------|
-| `alibabacloud-planning` | Clarify requirements and design Alibaba Cloud architectures (Day-1 / Day-2); 5-pillar deep-dive (Security / Stability / Cost / Efficiency / Performance) + mode-aware governance baseline gate |
+| `alibabacloud-planning` | Clarify requirements and design Alibaba Cloud architectures (新建 / 迭代); 5-pillar deep-dive (Security / Stability / Cost / Efficiency / Performance) + mode-aware governance baseline gate |
 | `alibabacloud-itgov-advisor` | Advisory knowledge base for CAF / Landing Zone / Well-Architected / 治理基线 / Agent Skills 门户; called by planning at Phase 0.0 (strategic routing), Phase 1 (scenario context), Phase 3c.5 (baseline cross-check) |
 | `alibabacloud-writing-plans` | Convert approved designs into Terraform HCL via the codegen skill |
 | `alibabacloud-terraform-codegen` | Generate and modify Alibaba Cloud Terraform HCL code |

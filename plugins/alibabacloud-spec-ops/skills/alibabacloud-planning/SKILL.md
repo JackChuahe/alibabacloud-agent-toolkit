@@ -1,6 +1,6 @@
 ---
 name: alibabacloud-planning
-description: "Act as an Alibaba Cloud expert to help users clarify requirements, design architecture, and plan infrastructure operations. Supports both Day-1 creation and Day-2 modification (scale, expand, adjust). Five-pillar (Security / Stability / Cost / Efficiency / Performance) deep-dive aligned with Alibaba Cloud Well-Architected Framework; production designs cross-checked against CAF four governance baselines via alibabacloud-itgov-advisor. WHEN: user mentions ECS, RDS, VPC, OSS, SLB, ACK, cloud resources, infrastructure needs, deploy on Alibaba Cloud, create server, setup database, cloud architecture, security group, scaling, load balancer, modify resources, upgrade instance, expand capacity, or any Alibaba Cloud service requirement."
+description: "Act as an Alibaba Cloud expert to help users clarify requirements, design architecture, and plan infrastructure operations. Supports both initial creation (新建) and ongoing iteration (迭代 — scale, expand, adjust). Five-pillar (Security / Stability / Cost / Efficiency / Performance) deep-dive aligned with Alibaba Cloud Well-Architected Framework; production designs cross-checked against CAF four governance baselines via alibabacloud-itgov-advisor. WHEN: user mentions ECS, RDS, VPC, OSS, SLB, ACK, cloud resources, infrastructure needs, deploy on Alibaba Cloud, create server, setup database, cloud architecture, security group, scaling, load balancer, modify resources, upgrade instance, expand capacity, or any Alibaba Cloud service requirement."
 license: MIT
 metadata:
   author: Alibaba Cloud
@@ -46,7 +46,7 @@ Activate this skill when user wants to:
 5. **Five-pillar evaluation** — In Full Mode, per-pillar deep-dive on **Security / Stability / Cost / Efficiency / Performance** (aligned with Alibaba Cloud Well-Architected Framework); in Fast Track, 5 quick questions + multi-plan comparison
 6. **Iterative & bounded** — One question at a time; Fast Track: 2-3 questions; Full Mode: 6-10 questions max
 7. **Create state directory** — Write design artifacts to `.aliyun-ai-ops-spec/{name}/`
-8. **Day-2 — design first, then dialogue** — When entering modification flow, you MUST read and fully internalize the existing `designs/design.md` BEFORE asking the user a single question about the change. All clarification, brainstorming, and five-pillar exploration in a Day-2 session MUST be framed as deltas against the documented design — never start the conversation from a blank slate when prior design exists.
+8. **迭代场景 — design first, then dialogue** — When entering modification flow, you MUST read and fully internalize the existing `designs/design.md` BEFORE asking the user a single question about the change. All clarification, brainstorming, and five-pillar exploration in an iteration session MUST be framed as deltas against the documented design — never start the conversation from a blank slate when prior design exists.
 9. **Single-workload boundary, advisor for upstream scope** — `alibabacloud-planning` only handles one workload at a time. Enterprise-scope requests (multi-account / Landing Zone / governance framework / 等保 / 出海) are detected in Phase 0.0 and delegated to `alibabacloud-itgov-advisor` first.
 10. **Governance baseline cross-check is mode-aware** — Production designs must pass Phase 3c.5 cross-check against CAF 4 governance baselines. Full Mode + production: 12-item hard gate. Fast Track + production: 6-item MVP advisory (non-blocking). dev/test: advisory only or skipped. See [Mode-Aware Behavior Matrix](#mode-aware-behavior-matrix) below.
 
@@ -170,7 +170,7 @@ Phase 0.0 is invisible to the user — proceed straight to Phase 0 without any p
 #### Edge cases
 
 - **Multiple groups hit**: present `AskUserQuestion` with the **first** matched group cited; the response branching is identical.
-- **Day-2 modify intent**: if Phase 0 detection later determines this is a modification (existing project on disk), Phase 0.0 is **always skipped** — strategic scope was already decided in the original Day-1 design. Re-detection would be noise.
+- **迭代变更 intent**: if Phase 0 detection later determines this is a modification (existing project on disk), Phase 0.0 is **always skipped** — strategic scope was already decided in the original 新建 design. Re-detection would be noise.
 
 ### Phase 0: Intent Detection & Project Discovery
 
@@ -241,7 +241,7 @@ Read: .aliyun-ai-ops-spec/{name}/designs/design.md
 ```
 
 If the file does not exist or is empty, STOP and tell the user:
-"该项目缺失 `designs/design.md`，无法在原有设计上做 Day-2 变更。需要补建设
+"该项目缺失 `designs/design.md`，无法在原有设计上做 迭代变更。需要补建设
 计文档，还是按新建项目处理？" Do not proceed without a resolved answer.
 
 ##### Step 4b: Read supporting context
@@ -393,7 +393,7 @@ In parallel with the MCP queries above, scan the user's Phase 1 answers for **sc
 1. **Read advisor chapter** — load the mapped `alibabacloud-itgov-advisor/...` section using the `Read` tool. Internalize its 决策表 + ⭐推荐 + 客户场景示例.
 2. **Refine Phase 1 questions** — replace generic dimensions with scenario-specific ones from the mapping (e.g. 等保 → 五层逐项;AI → MaaS/PaaS/IaaS 范式;出海 → 国内/国际站决策).
 3. **Carry forward to Mode Decision** — surface a soft mode-upgrade suggestion (see [Mode Decision](#mode-decision-fast-track-vs-full-planning) below); the user can still choose Fast Track.
-4. **Persist to design.md** — when finalizing the design, record matched scenarios + referenced advisor sections in a `## Scenario Context` block so Day-2 sessions inherit the prior context.
+4. **Persist to design.md** — when finalizing the design, record matched scenarios + referenced advisor sections in a `## Scenario Context` block so future iteration sessions inherit the prior context.
 
 **Multi-scenario stacking**: if ≥ 2 scenarios match (e.g. 等保 + AI),load all matched sections and merge their additional dimensions; do NOT pick one. The mode-upgrade language stacks the scenarios and **strongly** (not just softly) suggests Full Mode.
 
@@ -1192,7 +1192,7 @@ After the call returns, tell the user explicitly:
 
 ## Scenario Context
 {If Phase 1 hit any advisor scenarios (等保 / AI / 出海 / 多账号 / 加密 / 容灾),
- list them here along with the advisor sections referenced. Day-2 sessions
+ list them here along with the advisor sections referenced. 迭代会话
  inherit this context. Format: "- 等保三级 → advisor/caf-knowledge-base.md § 5"}
 
 ## Architecture
@@ -1291,16 +1291,16 @@ After the call returns, tell the user explicitly:
 }
 ```
 
-**Day-2 modification:** when re-entering planning on an existing project,
+**迭代变更:** when re-entering planning on an existing project,
 do NOT overwrite the `state` object — read it, preserve every field, set
 `change_type` to `"modify"`, and update only `status` + `updated_at`.
 `executing-plans` is the sole writer of `state.*` fields after the initial
 scaffold here.
 
 `governance_baseline_check` is written here at the end of Phase 3c.5
-(planning is the producer). Day-2 sessions read prior result to compare,
+(planning is the producer). 迭代会话读取上一次 result to compare,
 then overwrite with the new check result. `scenario_context` accumulates
-matched scenarios across Day-1 + Day-2 — never shrinks unless a scenario
+matched scenarios across 新建 + 迭代 — never shrinks unless a scenario
 is explicitly dropped from design.md.
 
 See [`../alibabacloud-writing-plans/references/directory-structure.md` → Status JSON Schema](../alibabacloud-writing-plans/references/directory-structure.md) for the full schema reference.
@@ -1401,6 +1401,6 @@ confirmation.
 | Vaguely say "recommend using best practices" | Not specific, not actionable | "Use cloud_essd PL1 instead of cloud_efficiency — your DB workload has high IOPS demand" |
 | Give spec recommendations without querying MCP | May be outdated or inaccurate | Query IaCService/Document first, then recommend |
 | Expand into DR/multi-region/Serverless without user asking | Diverges from user's goal | Only raise when directly relevant to stated requirements |
-| Force enterprise-LZ scope into single-workload planning | Mixes incompatible scopes; planning becomes bloated and Day-2 state corrupted | Phase 0.0 detects enterprise keywords and delegates to `alibabacloud-itgov-advisor` first |
+| Force enterprise-LZ scope into single-workload planning | Mixes incompatible scopes; planning becomes bloated and 迭代状态被破坏 | Phase 0.0 detects enterprise keywords and delegates to `alibabacloud-itgov-advisor` first |
 | Treat production with Fast Track + zero baseline check | Silent compliance violations ship to prod | Production always gets at minimum the 6-item MVP advisory; Full Mode + production gets the 12-item hard gate |
 | Conflate Pillar 4 (Efficiency, ops workflow) with Pillar 5 (Performance, runtime) | Misleads recommendations — ops folks get APM advice they don't need; app engineers get IaC advice that doesn't help them | Keep the split per Phase 2 rules; Efficiency = research/ops, Performance = runtime characteristics |

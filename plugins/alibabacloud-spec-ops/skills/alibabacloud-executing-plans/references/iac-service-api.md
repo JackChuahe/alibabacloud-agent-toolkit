@@ -164,12 +164,12 @@ AlibabaCloud___CallCLI:
 }
 ```
 
-## State Persistence (Day-1 vs Day-2)
+## State Persistence (新建 vs 迭代)
 
 IaC Service stores each deployment's Terraform state remotely, indexed by
 the `state_id` returned from `execute-terraform-plan`. The
 `executing-plans` skill is responsible for round-tripping this value
-through `tasks/status.json` so that subsequent invocations (Day-2
+through `tasks/status.json` so that subsequent invocations (迭代
 iteration, retry-after-failure, destroy) continue on the same remote state
 instead of creating a new one.
 
@@ -182,12 +182,12 @@ instead of creating a new one.
 | Plan fails | (unchanged) | Keep any prior `state_id`; failed plan does not delete remote state |
 | Destroy succeeds | `state.last_destroy_at`, top-level `status: "destroyed"` | Keep `state_id` as historical record |
 
-### Day-1 vs Day-2 call shape
+### 新建 vs 迭代 call shape
 
 | Scenario | Prior `state.state_id` | Plan CLI |
 | --- | --- | --- |
-| Day-1 (first ever plan/apply for this requirement) | absent / empty | `execute-terraform-plan --code '{HCL}' --client-token <uuid>` |
-| Day-2 (iteration on existing infra) | present | `execute-terraform-plan --code '{HCL}' --state-id <id> --client-token <uuid>` |
+| 新建 (第一次 plan/apply) | absent / empty | `execute-terraform-plan --code '{HCL}' --client-token <uuid>` |
+| 迭代 (在已有基础设施上变更) | present | `execute-terraform-plan --code '{HCL}' --state-id <id> --client-token <uuid>` |
 
 `execute-terraform-apply` always passes `--state-id`. It accepts an
 optional `--code` only when the HCL changed between plan and apply
@@ -199,7 +199,7 @@ If status.json has `status: "executed"` but `state.state_id` is missing
 (file predates this schema), the safe response is to STOP and ask the
 user. Choices:
 
-- Treat as Day-1 → fresh state, risks duplicate resources alongside the
+- Treat as 新建 → fresh state, risks duplicate resources alongside the
   legacy live infrastructure
 - Have the user paste a known `state_id` to adopt
 - Abort

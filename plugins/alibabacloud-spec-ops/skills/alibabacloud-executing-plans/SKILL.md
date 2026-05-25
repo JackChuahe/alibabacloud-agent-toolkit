@@ -51,12 +51,12 @@ Activate when:
 6. **Support rollback** — Provide destroy option if apply fails
 7. **Poll for completion** — IaC Service is async; use sequential MCP calls to poll
 8. ⚠️ **Destructive operations (destroy) require double confirmation**
-9. **Persist `state_id`** — IaC Service keeps the Terraform state remotely keyed by `state_id`. This skill MUST write it back to `tasks/status.json` (under `state.state_id`) on every Plan / Apply / Destroy and MUST pass the saved value on every subsequent Day-2 call. Losing the `state_id` orphans the remote state and forces a fresh deploy (potential duplicate resources).
-10. **Source-of-truth integrity** — Some failures are only discoverable at apply time (SKU offline in target AZ, zone out-of-capacity, etc.). Any spec change forced by such a failure MUST be written back to BOTH `designs/design.md` (with a Decisions Log entry) AND `designs/terraform/*.tf` BEFORE re-running plan/apply. **Never hot-patch the in-flight apply** — Day-2 iterations re-read these files and will redeploy the broken spec if it isn't fixed at the source.
+9. **Persist `state_id`** — IaC Service keeps the Terraform state remotely keyed by `state_id`. This skill MUST write it back to `tasks/status.json` (under `state.state_id`) on every Plan / Apply / Destroy and MUST pass the saved value on every subsequent 迭代调用. Losing the `state_id` orphans the remote state and forces a fresh deploy (potential duplicate resources).
+10. **Source-of-truth integrity** — Some failures are only discoverable at apply time (SKU offline in target AZ, zone out-of-capacity, etc.). Any spec change forced by such a failure MUST be written back to BOTH `designs/design.md` (with a Decisions Log entry) AND `designs/terraform/*.tf` BEFORE re-running plan/apply. **Never hot-patch the in-flight apply** — 迭代变更s re-read these files and will redeploy the broken spec if it isn't fixed at the source.
 
 ---
 
-## State Persistence (CRITICAL for Day-2)
+## State Persistence (CRITICAL for iterations)
 
 IaC Service stores each deployment's Terraform state remotely, indexed by
 `state_id`. This handle is the contract that lets you iterate on the same
@@ -69,12 +69,12 @@ infrastructure across multiple `executing-plans` invocations:
 | Step 5/6 (after apply succeeds) | — | `state.state_id` (re-confirm), `state.last_apply_at` |
 | Destroy (after success) | — | `state.last_destroy_at`; keep `state_id` as historical record |
 
-**Branching by Day-1 vs Day-2:**
+**Branching by 新建 vs 迭代:**
 
 | Scenario | Saved `state_id` | Plan CLI |
 | --- | --- | --- |
-| Day-1 (first run) | absent / empty | `--code '{CODE}' --client-token <uuid>` |
-| Day-2 (iteration) | present | `--code '{CODE}' --state-id {STATE_ID} --client-token <uuid>` |
+| 新建 (首次执行) | absent / empty | `--code '{CODE}' --client-token <uuid>` |
+| 迭代 | present | `--code '{CODE}' --state-id {STATE_ID} --client-token <uuid>` |
 
 Apply always passes `--state-id`; pass `--code` too only when the HCL
 changed between plan and apply (rare — usually code is already final at
@@ -84,7 +84,7 @@ plan time).
 is absent (status.json predates this schema), STOP before touching the
 remote — ask the user whether to:
 
-- (a) treat this as Day-1 and create a fresh state (risks duplicate
+- (a) treat this as 新建 and create a fresh state (risks duplicate
   resources alongside the legacy deployment), or
 - (b) abort and let the user supply the missing `state_id` manually
   (recommended if they know it).
@@ -115,17 +115,17 @@ Never silently start fresh — the user paid for those resources.
 ### Step 1: Verify Prerequisites
 
 1. Read `tasks/status.json`:
-   - `status` must be `"validated"` (Day-1) OR `"executed"` (Day-2 re-iteration after planning produced new code)
-   - Capture `state.state_id` into `{STATE_ID}` (may be empty on first run — that signals Day-1)
+   - `status` must be `"validated"` (新建) OR `"executed"` (迭代再执行 after planning produced new code)
+   - Capture `state.state_id` into `{STATE_ID}` (may be empty on first run — that signals 新建)
    - If `status == "executed"` but `state.state_id` is missing, see the
-     legacy edge case in [State Persistence](#state-persistence-critical-for-day-2) before proceeding
+     legacy edge case in [State Persistence](#state-persistence-critical-for-iterations) before proceeding
 2. Read `tasks/validation-report.md` — must show all reviews PASS
-3. Confirm user intent one more time, and surface whether this is Day-1 or Day-2:
+3. Confirm user intent one more time, and surface whether this is 新建 or 迭代:
 
 > "Ready to execute Terraform.
 >
-> {Day-1: This will create real cloud resources on Alibaba Cloud and incur costs.}
-> {Day-2: This will update the existing deployment (state `{STATE_ID}`); changes
+> {新建: This will create real cloud resources on Alibaba Cloud and incur costs.}
+> {迭代: This will update the existing deployment (state `{STATE_ID}`); changes
 > shown in the next plan output will be applied to the live resources.}
 >
 > Proceed with `terraform plan`?"
@@ -148,14 +148,14 @@ Concatenate all content into one `CODE` string. This will be passed inline via `
 
 **Branch by whether `{STATE_ID}` was loaded in Step 1.**
 
-**Day-1 (no prior `state_id`):**
+**新建 (no prior `state_id`):**
 
 ```
 AlibabaCloud___CallCLI:
   command: "aliyun iacservice execute-terraform-plan --code '{CODE}' --client-token {CLIENT_TOKEN}"
 ```
 
-**Day-2 (continuing on saved `state_id`):**
+**迭代 (continuing on saved `state_id`):**
 
 ```
 AlibabaCloud___CallCLI:
@@ -166,10 +166,10 @@ Where:
 
 - `{CODE}` = concatenated .tf content (single quotes properly escaped)
 - `{CLIENT_TOKEN}` = fresh UUID (format `[0-9a-zA-Z-]{1,64}`) — required for idempotency
-- `{STATE_ID}` = value from `tasks/status.json` → `state.state_id` (Day-2 only)
+- `{STATE_ID}` = value from `tasks/status.json` → `state.state_id` (迭代 only)
 
 **Response contains a state file ID (typically `StateId`)** — capture it as
-`{STATE_ID}`. On Day-2 it will match the value passed in; on Day-1 this is
+`{STATE_ID}`. On 迭代 it will match the value passed in; on 新建 this is
 the freshly minted one.
 
 **PERSIST IMMEDIATELY** — before polling, before showing the plan output to
@@ -220,7 +220,7 @@ Display:
 > 即将自动进入 apply 阶段。如发现 plan 不符合预期，请立刻中断我（例如按 Esc / 中止当前消息）。"
 
 If the plan output reveals something the user clearly did not consent to
-(e.g. unexpected resource destruction in a Day-2 modify when no destroy
+(e.g. unexpected resource destruction in a 迭代变更 when no destroy
 was discussed), STOP and surface it as a question — this is a safety
 override, not the default flow:
 
@@ -306,7 +306,7 @@ SUCCESS / FAILED
    }
    ```
 
-   `state.state_id` MUST be retained even on Day-2 transitions (do not clear
+   `state.state_id` MUST be retained even on 迭代过程 (do not clear
    it between iterations). Subsequent `executing-plans` invocations will read
    it back in Step 1 to continue on the same remote state.
 
@@ -476,9 +476,9 @@ Once user confirms a replacement, **before any re-run**:
    - Do NOT reformat unrelated code; keep the diff minimal so the
      change is auditable
 
-This is Rule 10. Skipping either file silently breaks Day-2:
+This is Rule 10. Skipping either file silently breaks 迭代:
 
-- Skip design.md → next Day-2 planning reads stale design and "fixes"
+- Skip design.md → next 迭代规划 reads stale design and "fixes"
   the difference back to the broken spec
 - Skip .tf → next plan still fails the same way
 
@@ -540,7 +540,7 @@ After destroy succeeds, update `tasks/status.json`:
 
 **Keep `state.state_id` as a historical record** — do not clear it. If the
 user later wants to redeploy fresh (new state), planning will detect
-`status == "destroyed"` and prompt for net-new Day-1 vs reuse decision.
+`status == "destroyed"` and prompt for 净新建 vs reuse decision.
 
 ---
 

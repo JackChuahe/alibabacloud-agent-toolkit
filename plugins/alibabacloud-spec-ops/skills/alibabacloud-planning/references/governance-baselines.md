@@ -125,7 +125,7 @@ Phase 3c.5 的结果必须写入 design.md 的新章节:
 ```
 
 `status.json` 同步写入 `governance_baseline_check` 字段(详见
-`writing-plans/references/directory-structure.md`),以便 Day-2 复审。
+`writing-plans/references/directory-structure.md`),以便 迭代复审。
 
 ## 维护
 

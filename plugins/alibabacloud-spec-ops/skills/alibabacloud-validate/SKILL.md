@@ -182,7 +182,7 @@ Write to `.aliyun-ai-ops-spec/{name}/tasks/validation-report.md`:
 >
 > **下一步：要现在进入部署吗？**
 >
-> 部署会通过 IaC Service 远程**自动**执行 `terraform plan` 与 `apply`——回复一次 \"部署\" 即授权整条链路完成，**真正在云上创建资源并产生费用**。我会把 plan 结果展示给你，但不会再停下来二次确认；如果 plan 出现非预期的破坏性变更（例如 Day-2 中要 destroy 资源），我会主动停下来询问。
+> 部署会通过 IaC Service 远程**自动**执行 `terraform plan` 与 `apply`——回复一次 \"部署\" 即授权整条链路完成，**真正在云上创建资源并产生费用**。我会把 plan 结果展示给你，但不会再停下来二次确认；如果 plan 出现非预期的破坏性变更（例如 迭代中要 destroy 资源），我会主动停下来询问。
 >
 > 回复 **\"部署\"** / **\"yes\"** → 进入 `alibabacloud-spec-ops:alibabacloud-executing-plans`，自动完成 plan + apply。
 > 想再调整代码或暂停？直接告诉我，或随时打断我（Esc / 中止当前消息）。"
