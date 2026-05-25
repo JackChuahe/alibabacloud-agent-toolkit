@@ -221,12 +221,24 @@ The server is named distinctly from `alibabacloud-core` to avoid namespace colli
 
 | Skill | Description |
 |-------|-------------|
-| `alibabacloud-planning` | Clarify requirements and design Alibaba Cloud architectures (Day-1 / Day-2) |
+| `alibabacloud-planning` | Clarify requirements and design Alibaba Cloud architectures (Day-1 / Day-2); 5-pillar deep-dive (Security / Stability / Cost / Efficiency / Performance) + mode-aware governance baseline gate |
+| `alibabacloud-itgov-advisor` | Advisory knowledge base for CAF / Landing Zone / Well-Architected / 治理基线 / Agent Skills 门户; called by planning at Phase 0.0 (strategic routing), Phase 1 (scenario context), Phase 3c.5 (baseline cross-check) |
 | `alibabacloud-writing-plans` | Convert approved designs into Terraform HCL via the codegen skill |
 | `alibabacloud-terraform-codegen` | Generate and modify Alibaba Cloud Terraform HCL code |
 | `alibabacloud-validate` | Dual review (spec compliance + code quality) — auto-runs after codegen |
 | `alibabacloud-executing-plans` | Execute validated Terraform plans through Alibaba Cloud IaC Service |
 | `alibabacloud-ram-permission-diagnose` | Diagnose and repair RAM permission errors (403 / NoPermission / etc.) |
+
+### planning ↔ itgov-advisor 融合关系
+
+`alibabacloud-planning` 保持单 workload 范围,在 4 个挂钩点引用 `alibabacloud-itgov-advisor` 的知识库:
+
+1. **Phase 0.0 战略分流** — 检测到企业级关键词(多账号/LZ/CCoE/等保/出海) → 推荐先调 advisor 做上游规划
+2. **Phase 1 场景化先验** — 触发场景(等保/AI/出海/加密/容灾/多账号) → 加载 advisor 对应章节作为提问框架
+3. **Phase 2 五支柱升级** — 从 4 支柱升级为 5 支柱(加 Performance),对齐 WA 官方
+4. **Phase 3c.5 治理基线 cross-check** — 生产环境 Full Mode 走 12 项硬闸门,Fast Track 走 6 项 MVP advisory
+
+advisor 仅提供战略 / 治理决策依据,planning 仍是落地代码的唯一入口。详见 [`skills/alibabacloud-planning/SKILL.md` § Mode-Aware Behavior Matrix](./skills/alibabacloud-planning/SKILL.md)。
 
 ## Agents
 
