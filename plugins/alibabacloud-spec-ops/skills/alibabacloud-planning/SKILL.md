@@ -1,10 +1,10 @@
 ---
 name: alibabacloud-planning
-description: "Act as an Alibaba Cloud expert to help users clarify requirements, design architecture, and plan infrastructure operations. Supports both Day-1 creation and Day-2 modification (scale, expand, adjust). WHEN: user mentions ECS, RDS, VPC, OSS, SLB, ACK, cloud resources, infrastructure needs, deploy on Alibaba Cloud, create server, setup database, cloud architecture, security group, scaling, load balancer, modify resources, upgrade instance, expand capacity, or any Alibaba Cloud service requirement."
+description: "Act as an Alibaba Cloud expert to help users clarify requirements, design architecture, and plan infrastructure operations. Supports both Day-1 creation and Day-2 modification (scale, expand, adjust). Five-pillar (Security / Stability / Cost / Efficiency / Performance) deep-dive aligned with Alibaba Cloud Well-Architected Framework; production designs cross-checked against CAF four governance baselines via alibabacloud-itgov-advisor. WHEN: user mentions ECS, RDS, VPC, OSS, SLB, ACK, cloud resources, infrastructure needs, deploy on Alibaba Cloud, create server, setup database, cloud architecture, security group, scaling, load balancer, modify resources, upgrade instance, expand capacity, or any Alibaba Cloud service requirement."
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.6.0"
+  version: "0.7.0"
 ---
 
 # Alibaba Cloud Planning
@@ -20,8 +20,9 @@ metadata:
 > 1. Help users clarify requirements and define boundaries
 > 2. Proactively brainstorm — explore aspects the user hasn't considered
 > 3. Use MCP tools to query real-time data to validate and enrich your recommendations
-> 4. Evaluate every key decision from **Security, Cost, Efficiency, Stability** perspectives
+> 4. Evaluate every key decision from **Security, Stability, Cost, Efficiency, Performance** perspectives (5 pillars, aligned with Alibaba Cloud Well-Architected Framework)
 > 5. Give recommendations and let the user decide (don't make users figure things out alone)
+> 6. For production designs, cross-check against CAF 4 governance baselines via `alibabacloud-itgov-advisor` — never let a production design exit planning with silent baseline violations
 
 ---
 
@@ -42,16 +43,52 @@ Activate this skill when user wants to:
 2. **Expert persona with opinions** — Give clear recommendations with rationale for every technical decision; never present neutral lists without guidance
 3. **Adaptive workflow** — Assess complexity early; offer Fast Track for simple/clear requests, Full Mode for complex architectures
 4. **MCP-driven intelligence** — Use MCP tools to query real-time data during BOTH clarification and design phases
-5. **Four-pillar evaluation** — In Full Mode, per-pillar deep-dive; in Fast Track, 4 quick questions + multi-plan comparison
-6. **Iterative & bounded** — One question at a time; Fast Track: 2-3 questions; Full Mode: 6-8 questions max
+5. **Five-pillar evaluation** — In Full Mode, per-pillar deep-dive on **Security / Stability / Cost / Efficiency / Performance** (aligned with Alibaba Cloud Well-Architected Framework); in Fast Track, 5 quick questions + multi-plan comparison
+6. **Iterative & bounded** — One question at a time; Fast Track: 2-3 questions; Full Mode: 6-10 questions max
 7. **Create state directory** — Write design artifacts to `.aliyun-ai-ops-spec/{name}/`
-8. **Day-2 — design first, then dialogue** — When entering modification flow, you MUST read and fully internalize the existing `designs/design.md` BEFORE asking the user a single question about the change. All clarification, brainstorming, and four-pillar exploration in a Day-2 session MUST be framed as deltas against the documented design — never start the conversation from a blank slate when prior design exists.
+8. **Day-2 — design first, then dialogue** — When entering modification flow, you MUST read and fully internalize the existing `designs/design.md` BEFORE asking the user a single question about the change. All clarification, brainstorming, and five-pillar exploration in a Day-2 session MUST be framed as deltas against the documented design — never start the conversation from a blank slate when prior design exists.
+9. **Single-workload boundary, advisor for upstream scope** — `alibabacloud-planning` only handles one workload at a time. Enterprise-scope requests (multi-account / Landing Zone / governance framework / 等保 / 出海) are detected in Phase 0.0 and delegated to `alibabacloud-itgov-advisor` first.
+10. **Governance baseline cross-check is mode-aware** — Production designs must pass Phase 3c.5 cross-check against CAF 4 governance baselines. Full Mode + production: 12-item hard gate. Fast Track + production: 6-item MVP advisory (non-blocking). dev/test: advisory only or skipped. See [Mode-Aware Behavior Matrix](#mode-aware-behavior-matrix) below.
+
+---
+
+## Mode-Aware Behavior Matrix
+
+The 4 itgov-advisor integration hooks below behave differently based on the
+selected Mode (Fast Track / Full Mode) and the environment (production vs
+dev/test). This matrix is **authoritative** — when in doubt, look it up.
+
+| Hook | Fast Track + dev/test | Fast Track + 生产 | Full Mode + dev/test | Full Mode + 生产 |
+|---|---|---|---|---|
+| **Phase 0.0** 战略分流 | Reverse-keyword check;skip if hit | Same — reverse-keyword skip | Trigger if enterprise keywords + no reverse hit | Same |
+| **Phase 1** 场景化先验加载 | Not loaded | Loaded if scenario hit + soft suggest Full Mode | Loaded if scenario hit | Loaded if scenario hit |
+| **Phase 2** 五支柱 | 5 questions, 1 round | 5 questions, 1 round | Per-pillar deep-dive (6–10 questions) | Per-pillar deep-dive |
+| **Phase 3c.5** 基线 cross-check | **Skipped** | **6-item MVP advisory** (⚠️ non-blocking) | 12-item advisory checklist | **12-item hard gate** (can block Phase 5) |
+
+**Production-environment signal** (any one of the following classifies the
+design as "production"):
+
+- User explicitly says "生产 / production / prod / 线上" anywhere in Phase 0 or Phase 1
+- Full Mode + design contains "HA / 高可用 / 多 AZ / 主备 / DR" keywords
+- Resource count ≥ 4 with no "dev / test / 个人 / 测试 / 学习" reverse keyword
+
+Authoritative trigger and keyword references:
+
+- [`references/strategic-context-keywords.md`](references/strategic-context-keywords.md) — Phase 0.0 keyword groups + reverse keywords
+- [`references/scenario-pillar-loading.md`](references/scenario-pillar-loading.md) — Phase 1 scenario → advisor-chapter map
+- [`references/governance-baselines.md`](references/governance-baselines.md) — Phase 3c.5 12-item / 6-item check lists + 修复建议片段
 
 ---
 
 ## Process
 
 ```
+┌─────────────────────┐
+│ 0.0 Strategic Gate  │ ── Enterprise keywords + no reverse?
+│ (keyword routing)   │      ├── Yes ──▶ Suggest itgov-advisor (3 options)
+└─────────────────────┘      └── No  ──▶ continue
+            │
+            ▼
 ┌──────────────┐
 │ 0. Intent    │──── New? ────▶ Phase 1 (Clarify)
 │ Detection    │
@@ -62,19 +99,78 @@ Activate this skill when user wants to:
                                     │                                                       │
 ┌──────────────┐     ┌──────────┐  │  ┌──────────────┐     ┌──────────────┐               │
 │ 1. Clarify   │────▶│ Mode     │──┴─▶│ Quick Specs  │────▶│ Confirm +    │──── Auto ────▶│ writing-plans
-│ + MCP Query  │     │ Decision │     │ + Cost Est.  │     │ Code Gen     │               │ (syntax-only validate)
+│ + MCP Query  │     │ Decision │     │ + 5-pillar   │     │ Baseline MVP │               │ (syntax-only validate)
+│ + Scenario   │     │ + Scope  │     │   quick Qs   │     │ ⚠️ + Code Gen │               │
+│   loading    │     │ upgrade  │     │ + Cost Est.  │     │              │               │
 └──────────────┘     └────┬─────┘     └──────────────┘     └──────────────┘               │
                           │                                                                │
                           │ FULL MODE                                                      │
                           │                                                                │
                           ▼                                                                │
                      ┌──────────────┐     ┌──────────────┐     ┌──────────────┐           │
-                     │ 2. Deep-Dive │────▶│ 3. Design    │────▶│ 4. Confirm   │─── Auto ──┘
-                     │ Per-Pillar   │     │ + Compare    │     │ + Persist    │
-                     └──────────────┘     └──────────────┘     └──────────────┘
+                     │ 2. Deep-Dive │────▶│ 3a/b Design  │────▶│ 3c/c.5       │── Auto ──▶│
+                     │ 5 Pillars    │     │ + Compare    │     │ 5-pillar     │           │
+                     │              │     │              │     │ + Baseline   │           │
+                     │              │     │              │     │ Gate (prod)  │           │
+                     │              │     │              │     │ → 4. HTML    │           │
+                     │              │     │              │     │ → 5. Confirm │           │
+                     └──────────────┘     └──────────────┘     └──────────────┘           │
+                                                                                           │
+                                                                                           ▼
+                                                                              writing-plans (auto-chain)
 ```
 
 ---
+
+### Phase 0.0: Strategic Context Routing (Pre-Intent)
+
+**Goal:** Detect whether the request is enterprise-scope (multi-account / LZ / governance) and, if so, offer to delegate the upstream architectural decisions to `alibabacloud-itgov-advisor` before single-workload design begins. Single-workload requests bypass this phase entirely.
+
+This phase fires BEFORE Phase 0 — it gates whether spec-ops planning is even the right tool for the current request.
+
+#### Trigger logic
+
+Match the user's **first message** against the keyword groups in
+[`references/strategic-context-keywords.md`](references/strategic-context-keywords.md):
+
+1. **Skip Phase 0.0** when ANY reverse keyword hits (单台 / 一个 / 个人 / 测试 / dev / ...). Proceed directly to Phase 0.
+2. **Trigger Phase 0.0** when ANY enterprise keyword hits AND no reverse keyword hits.
+3. **Default skip** when no enterprise keyword hits.
+
+#### Triggered behavior
+
+Use `AskUserQuestion` to surface three explicit choices — never improvise prose:
+
+```
+AskUserQuestion:
+  question: "你的请求涉及企业级治理（{matched_keyword}）。在做具体工作负载设计前，
+             要不要先理清整体云治理 / Landing Zone 框架?"
+  header: "战略层"
+  multiSelect: false
+  options:
+    - label: "先做战略规划 (调用 itgov-advisor)"
+      description: "调起 alibabacloud-itgov-advisor 顾问做 CAF / Landing Zone / 治理基线层面的方案咨询；
+                    完成后回到此处继续工作负载设计。"
+    - label: "已有 LZ，直接进入工作负载设计"
+      description: "进入 Phase 0；Phase 1 会额外追问 LZ 上下文（目标账号 / VPC ID / CEN 拓扑 / SG 基线）。"
+    - label: "暂不考虑 LZ，先做工作负载"
+      description: "直接进入现行流程，不再追问治理层面的事。"
+```
+
+| 用户选择 | 后续行为 |
+|---|---|
+| 先做战略规划 | 通过 Skill 工具调用 `alibabacloud-spec-ops:alibabacloud-itgov-advisor`,advisor 完成对话后用户主动回到 planning,planning 再走 Phase 0 |
+| 已有 LZ 直接做工作负载 | 进入 Phase 0; Phase 1 在 Clarification 表里增加 "LZ 上下文" 行(目标账号 ID + VPC ID + CEN/共享 VPC 信息 + 现有 SG 基线) |
+| 暂不考虑 LZ | 进入 Phase 0,正常流程 |
+
+#### Skipped behavior
+
+Phase 0.0 is invisible to the user — proceed straight to Phase 0 without any prompt or status mention.
+
+#### Edge cases
+
+- **Multiple groups hit**: present `AskUserQuestion` with the **first** matched group cited; the response branching is identical.
+- **Day-2 modify intent**: if Phase 0 detection later determines this is a modification (existing project on disk), Phase 0.0 is **always skipped** — strategic scope was already decided in the original Day-1 design. Re-detection would be noise.
 
 ### Phase 0: Intent Detection & Project Discovery
 
@@ -206,7 +302,7 @@ just list resources:**
 > - SLB: 公网, 按量付费
 > - VPC + 2 VSwitch (cn-hangzhou-h, cn-hangzhou-i)  ({rationale, e.g. "为跨 AZ 预留，但当前仅 ECS 跨 AZ"})
 >
-> **四支柱当前态：**
+> **五支柱当前态：**
 >
 > - 安全：{summary from design.md}
 > - 稳定：{summary, including known gaps}
@@ -232,7 +328,7 @@ After understanding the change request, proceed to **Phase 1 (Clarify)** with th
 | Aspect | New Build | Modification |
 |--------|-----------|--------------|
 | Clarification focus | Full scope from zero | Delta only — what changes, what stays. Every question MUST reference the existing design (e.g. "现有 RDS 是单实例无主备，扩容要不要顺带启用主备？"), never ask as if there were no prior design |
-| Four-pillar exploration | Cover all four pillars from zero | Delta on each pillar — does the change affect security posture? stability? cost ceiling? efficiency? Anchor each pillar on what Step 4.5 captured |
+| Five-pillar exploration | Cover all five pillars from zero | Delta on each pillar — does the change affect security posture? stability? cost ceiling? efficiency (ops workflow)? performance (runtime characteristics)? Anchor each pillar on what Step 4.5 captured |
 | Mode decision context | Assess total complexity | Assess **change** complexity (small change → Fast Track) |
 | Design output | New design.md | **Updated** design.md (preserve existing, add/modify sections; append to Decisions Log) |
 | Terraform output | New .tf files | **Modified** .tf files (add resources, change specs) |
@@ -290,6 +386,17 @@ AlibabaCloud___ListApis: product="Oss", filter="Bucket"
 
 **Key:** Don't wait until Phase 2 to query data. When the user mentions a specific service, query immediately and use real-time data to inform your follow-up questions and recommendations.
 
+#### Scenario-Driven Expert Context Loading (advisor integration)
+
+In parallel with the MCP queries above, scan the user's Phase 1 answers for **scenario triggers** listed in [`references/scenario-pillar-loading.md`](references/scenario-pillar-loading.md). When triggered:
+
+1. **Read advisor chapter** — load the mapped `alibabacloud-itgov-advisor/...` section using the `Read` tool. Internalize its 决策表 + ⭐推荐 + 客户场景示例.
+2. **Refine Phase 1 questions** — replace generic dimensions with scenario-specific ones from the mapping (e.g. 等保 → 五层逐项;AI → MaaS/PaaS/IaaS 范式;出海 → 国内/国际站决策).
+3. **Carry forward to Mode Decision** — surface a soft mode-upgrade suggestion (see [Mode Decision](#mode-decision-fast-track-vs-full-planning) below); the user can still choose Fast Track.
+4. **Persist to design.md** — when finalizing the design, record matched scenarios + referenced advisor sections in a `## Scenario Context` block so Day-2 sessions inherit the prior context.
+
+**Multi-scenario stacking**: if ≥ 2 scenarios match (e.g. 等保 + AI),load all matched sections and merge their additional dimensions; do NOT pick one. The mode-upgrade language stacks the scenarios and **strongly** (not just softly) suggests Full Mode.
+
 ### Mode Decision: Fast Track vs Full Planning
 
 **After 1-2 initial clarification questions**, assess complexity and offer mode choice:
@@ -314,15 +421,37 @@ After understanding the basic intent (1-2 questions), present the mode choice ex
 >
 > **A. 快速模式** — 我帮你快速确认关键规格（地域、实例规格、版本等），给出推荐方案和费用估算，确认后直接生成代码
 >
-> **B. 完整规划** — 深度探讨安全、高可用、成本优化等维度，产出完整架构设计方案
+> **B. 完整规划** — 深度探讨安全、稳定、成本、效率、性能五大维度，产出完整架构设计方案
 >
 > 你倾向哪个？"
+
+#### Scenario-triggered soft upgrade
+
+When Phase 1 hit one or more scenario triggers (see [Scenario-Driven Expert Context Loading](#scenario-driven-expert-context-loading-advisor-integration)), prepend a soft upgrade suggestion to the prompt above:
+
+**Single scenario (soft suggest):**
+
+> "你的需求涉及 **{matched scenario}** —— 该场景通常需要完整规划（覆盖 {scenario-specific dimensions}）。
+>
+> **建议走 Full Mode**，但你仍可坚持 Fast Track —— 我会保留 advisor 章节作为提问框架，但跳过 deep-dive。
+>
+> {then ask the standard A/B mode question}"
+
+**Multiple scenarios (strong suggest):**
+
+> "你的需求同时涉及 **{scenario A}** 和 **{scenario B}**，跨多个治理领域。
+>
+> **强烈建议走 Full Mode** —— Fast Track 在多场景叠加下覆盖不全，容易遗漏关键决策。
+>
+> {then ask the standard A/B mode question; user can still override}"
+
+The user retains the right to choose either mode; the upgrade is advisory.
 
 #### Auto-decision Rules (skip asking user)
 
 - **Auto Fast Track:** User explicitly says "简单点"/"快速"/"直接帮我建"/"不需要高可用" → proceed to Fast Track without asking
 - **Auto Full Mode:** User mentions "生产"/"高可用"/"安全合规"/"企业" or requests 5+ resources → proceed to Full Mode without asking
-- **Ask user:** Everything else (borderline cases)
+- **Ask user:** Everything else (borderline cases) — apply scenario-triggered soft-upgrade prefix above when applicable
 
 ---
 
@@ -360,29 +489,30 @@ Use MCP to get real-time pricing for the options you present:
 AlibabaCloud___SearchDocument: query="ECS instance type ecs.c6.large pricing"
 ```
 
-#### Step 2: Four-Pillar Quick Questions (4 questions, 1 round)
+#### Step 2: Five-Pillar Quick Questions (5 questions, 1 round)
 
 After specs are confirmed, ask **each pillar one targeted question** in a single message — fast but covers essential needs:
 
-> 再确认 4 个快速问题，帮我给你匹配最合适的方案：
+> 再确认 5 个快速问题，帮我给你匹配最合适的方案：
 >
 > 1. **安全：** 数据有合规要求吗？（如加密存储、等保、IP 白名单限制）
 > 2. **稳定：** 能接受的最大故障恢复时间？（A. 分钟级-多AZ高可用 / B. 小时级-单AZ+备份恢复 即可）
-> 3. **性能：** 预估并发量级？（如 QPS < 100 / 100-1000 / > 1000）
-> 4. **成本：** 付费偏好？（A. 按量付费灵活 / B. 包年包月省钱 / C. 有预算上限：___元/月）
+> 3. **成本：** 付费偏好？（A. 按量付费灵活 / B. 包年包月省钱 / C. 有预算上限：___元/月）
+> 4. **效率：** 监控与运维偏好？（A. 默认云监控就够 / B. 接 ARMS APM 做应用全链路 / C. 自建 Prometheus+Grafana）
+> 5. **性能：** 预估并发量级与延迟敏感度？（如 QPS < 100 / 100-1000 / > 1000，是否需要 < 100ms 响应）
 >
 > 简单回复即可，没特殊要求的直接说"默认"。
 
 **Rules for this step:**
 
-- 4 questions in ONE message, user replies in ONE round
+- 5 questions in ONE message, user replies in ONE round
 - Each question is a **single choice or short answer**, not open-ended exploration
 - If user says "默认" / "都行" for any pillar → use best-practice defaults for that pillar
 - Based on user's answers, proceed to Step 3 with **2-3 differentiated plans** for comparison
 
 #### Step 3: Multi-Plan Comparison + Architecture Visualization (for confirmation)
 
-Based on the four-pillar answers, synthesize **2-3 differentiated plans** for user to choose, then generate HTML architecture visualization for the selected plan.
+Based on the five-pillar answers, synthesize **2-3 differentiated plans** for user to choose, then generate HTML architecture visualization for the selected plan.
 
 ##### Step 3a: Present plans for comparison
 
@@ -443,7 +573,7 @@ Write to `.aliyun-ai-ops-spec/{name}/designs/architecture.html`:
 <body>
   <h1>{Name} 架构方案</h1>
   <!-- Render: Internet → SLB/ALB entry → Region → VPC → AZ → Resources → Data flow -->
-  <!-- Render: Four-pillar summary cards -->
+  <!-- Render: Five-pillar summary cards -->
   <!-- Render: Cost total -->
 </body>
 </html>
@@ -453,7 +583,7 @@ Write to `.aliyun-ai-ops-spec/{name}/designs/architecture.html`:
 
 - Single file, no external dependencies, < 150 lines, < 5KB
 - No React/Vue/D3 — vanilla HTML + CSS only
-- Shows: region/AZ boundaries as nested containers, resource nodes with spec, data flow direction, four-pillar summary cards, cost total
+- Shows: region/AZ boundaries as nested containers, resource nodes with spec, data flow direction, five-pillar summary cards, cost total
 
 ##### Step 3c: Present final confirmation
 
@@ -475,12 +605,15 @@ Generate the HTML and display it directly, then present resource list for final 
 > | 6 | Security Group | — | ¥0 | 开放 80/443/22 |
 > | | **合计** | | **~¥375/月** | |
 >
-> **四柱评估：**
+> **五柱评估：**
 >
 > - 安全 ✅ RDS 仅内网、SG 最小化、删除保护
 > - 稳定 ✅ RDS 自动备份、高可用版
-> - 性能 ✅ cloud_essd 满足 IOPS、QPS < 100 无瓶颈
 > - 成本 ✅ 按量付费、最小可用规格
+> - 效率 ✅ 默认云监控告警，无需额外接入
+> - 性能 ✅ cloud_essd PL1 满足 IOPS、QPS < 100 无瓶颈
+>
+> {if production-environment signal hit, append Phase 3c.5 6-item MVP advisory output here — see [`references/governance-baselines.md`](references/governance-baselines.md). dev/test: skip.}
 >
 > **确认这个方案，还是想再一起讨论一下需求和架构设计？**
 >
@@ -492,7 +625,7 @@ Generate the HTML and display it directly, then present resource list for final 
 
 - Architecture visualization is **HTML**，生成后直接展示（部分 Agent 客户端支持内联渲染 HTML）
 - Resource list is a **numbered table** with all resources, specs, and costs
-- Four-pillar summary is a **one-line-per-pillar** quick assessment
+- Five-pillar summary is a **one-line-per-pillar** quick assessment
 - This is the ONLY confirmation gate — user says "确认" → proceed to code generation; anything else → treat as iteration request, refine and re-present
 
 #### Step 4: Confirm → Render TODO list → Auto Code Generation
@@ -508,14 +641,16 @@ When the user confirms:
 - ❌ Per-pillar deep-dive exploration (Phase 2's multi-round dialog)
 - ❌ Multi-option comparison (Phase 3a's 2-3 options table)
 - ❌ Multi-agent validation (spec-reviewer + quality-reviewer)
+- ❌ Phase 3c.5 12-item hard gate (replaced with 6-item MVP advisory for production)
 
 **Fast Track keeps:**
 
 - ✅ Essential spec boundaries confirmed
-- ✅ Four-pillar quick questions (4 questions, 1 round)
+- ✅ Five-pillar quick questions (5 questions, 1 round)
 - ✅ Multi-plan comparison (2-3 plans for user to choose)
 - ✅ HTML architecture visualization (生成并直接展示)
-- ✅ Cost estimate with four-pillar assessment
+- ✅ Cost estimate with five-pillar assessment
+- ✅ **6-item MVP governance baseline advisory** (production only, non-blocking ⚠️ flags) — see [`references/governance-baselines.md`](references/governance-baselines.md)
 - ✅ Code generation via terraform-codegen (schema-verified)
 - ✅ Remote syntax validation (`validate-module` only)
 - ✅ Explicit user confirmation before terraform apply
@@ -653,30 +788,60 @@ Present security decisions as scenarios with concrete options:
 - User says "variable traffic" → expand into Auto Scaling economics, preemptible instances
 - Large resource count → expand into Resource Group billing, cost alerts, budget caps
 
-#### Pillar 4: Efficiency Deep-Dive
+#### Pillar 4: Efficiency Deep-Dive (research / ops workflow)
+
+> **Note**: This pillar is **research/ops process efficiency** — IaC, CI/CD, monitoring, automation, observability. Runtime performance characteristics (IOPS, latency, scaling, caching) belong to **Pillar 5: Performance** below. The split aligns with Alibaba Cloud Well-Architected Framework 五大支柱.
 
 **Default questions (1-2):**
 
-> **Efficiency — Performance Architecture:**
-> Let's ensure your architecture doesn't have performance bottlenecks:
+> **Efficiency — 研发态 / 运行态自动化与可维护性:**
+> Let's discuss your operational workflow:
+>
+> | Decision Point | Options | Cost / Effort | Recommendation |
+> |---------------|---------|---------------|----------------|
+> | IaC management | 控制台手动 / Terraform 本地 / Terraform + CI | Setup: < 1d / 3d / 1w | Terraform + CI for production; spec-ops already gives you remote IaC Service execution |
+> | Monitoring | 默认云监控 / + ARMS APM 全链路 / 自建 Prometheus | ¥0 / ¥200-500/mo / 高运维 | 默认云监控起步;ARMS for production QPS > 100 |
+> | Auto deploy | SSH + scripts / OOS templates / ACK + Helm | low / mid / high | OOS for VM-based; ACK+Helm for container-based |
+> | Logging | 本地 + rotation / SLS 集中归集 | ¥0 / ~¥50-200/mo | SLS for production — 集中检索 + 告警 |
+>
+> 关键问题:
+>
+> - 团队是否已有 IaC / CI/CD 流水线?(没有的话,要不要顺带建一条 Terraform CI?)
+> - 监控告警目标响应时长?(影响监控选型 - 云监控 5 分钟 vs ARMS 秒级)
+
+**Adaptive expansion triggers:**
+
+- User mentions "团队多人" / "多环境" → expand into Terraform state 后端 + workspace 隔离
+- User mentions "需要审计" / "合规" → expand into SLS + ActionTrail 集中归集
+- User mentions "灰度 / canary" → expand into 蓝绿 / canary 发布 + 流量切分
+
+#### Pillar 5: Performance Deep-Dive (runtime characteristics)
+
+**Default questions (1-2):**
+
+> **Performance — 运行态性能与扩展性:**
+> Let's ensure your architecture handles real traffic — runtime performance, not just deployment workflow:
 >
 > | Decision Point | Options | Impact | Recommendation |
 > |---------------|---------|--------|----------------|
+> | 容量规划 | 静态估算 / 基于压测 / 弹性自适应 | 不足 → 宕机; 过度 → 浪费 | 关键服务做压测;非关键 + 弹性可走自适应 |
 > | Disk type | cloud_efficiency / cloud_ssd / cloud_essd PL0-3 | IOPS: 5K / 25K / 10K-1M | cloud_essd PL1 for DB workloads |
-> | DB read/write split | Single instance / Read replicas | Read throughput 2-5x | Add replica if read >70% |
-> | Caching layer | None / Redis (managed) / Tair | Latency: 5ms → <1ms | Redis if repeated queries >30% |
-> | CDN for static | None / CDN acceleration | Static load: 100% → ~5% on origin | CDN if serving static assets |
+> | DB read/write split | 单实例 / Read replicas | Read throughput 2-5x | Add replica if read > 70% |
+> | Caching layer | None / Redis (managed) / Tair | Latency: 5ms → < 1ms | Redis if repeated queries > 30% |
+> | CDN for static | None / CDN 加速 | Static load: 100% → ~5% on origin | CDN if serving static assets |
+> | Async/queue | 同步 / MQ / FC 事件驱动 | 响应延迟 / 吞吐 | Write-heavy + 长尾任务 |
+> | 性能监控 | 基础云监控 / + ARMS APM / + 全链路追踪 | 故障定位时长 | 生产建议 APM + 全链路 |
 >
-> Based on your web application:
+> Based on your application:
 >
-> - **Disk:** What's your expected database size and IOPS needs? (If unsure, cloud_essd PL1 is a safe default)
-> - **Read pattern:** Is your app read-heavy (dashboards, listings) or write-heavy (logging, transactions)?
+> - **Disk + IOPS:** 预期数据库大小与 IOPS 需求?(不确定时 cloud_essd PL1 安全默认)
+> - **Read pattern:** 读多还是写多?(影响 read replicas / cache 决策)
 
 **Adaptive expansion triggers:**
 
 - User mentions "high concurrency" → expand into connection pooling, async processing, queue architecture
 - User mentions "large files" → expand into OSS + CDN, multipart upload, lifecycle policies
-- User mentions "real-time" → expand into Redis/Tair, event-driven architecture
+- User mentions "real-time / 低延迟" → expand into Redis/Tair, event-driven architecture, BGP 加速
 
 ---
 
@@ -684,13 +849,14 @@ Present security decisions as scenarios with concrete options:
 
 | Rule | Description |
 |------|-------------|
-| **Per-pillar default** | 1 focused question with comparison table per pillar |
+| **Per-pillar default** | 1 focused question with comparison table per pillar (5 pillars total) |
 | **Adaptive expansion** | If user's answer reveals complexity, expand that pillar with 1-2 follow-ups |
 | **Skip trigger** | User says "simplest" / "dev environment" / "just get it running" → compress to 1 combined question covering only critical security items |
-| **Upper bound** | Phase 2 never exceeds 8 questions total across all pillars |
+| **Upper bound** | Phase 2 never exceeds **10 questions** total across all 5 pillars (was 8 for 4 pillars) |
 | **Cost data** | Use approximate ranges (¥-level) during exploration; exact MCP-verified prices in Phase 3 |
 | **Always recommend** | Every option table MUST have a marked recommendation with rationale |
 | **Context-specific** | Use the user's ACTUAL scenario in examples, not generic templates |
+| **Efficiency vs Performance split** | Keep Pillar 4 (Efficiency) on research/ops workflow only;Pillar 5 (Performance) on runtime characteristics. Don't merge them — they target different teams (ops vs application engineers) |
 
 **Boundary Rules:**
 
@@ -713,13 +879,14 @@ After fully understanding requirements, propose **2-3 options of different compl
 > |---|---|---|---|
 > | Monthly Cost | ~¥500 | ~¥1,200 | ~¥3,000+ |
 > | Security | Basic SG | SG + WAF ready | Network policies + Pod security |
-> | Efficiency | Manual scaling | Auto elastic | Pod-level elastic |
 > | Stability | No HA | Multi-AZ auto failover | Full HA + self-healing |
+> | Efficiency (ops) | 手动部署 + 控制台监控 | Terraform + 云监控告警 | Terraform + ARMS + ACK Dashboard |
+> | Performance | Single instance bottleneck | Auto elastic + APM | Pod-level elastic + 全链路 |
 > | Complexity | Low | Medium | High |
 >
 > **Why Option B:** Your traffic pattern (weekday peaks, quiet weekends) is ideal for auto scaling — automatically scales up during peaks for stability, scales down during valleys to save cost. Option A cannot meet your 99.9% SLA requirement; Option C has excessive operational complexity for a single web service.
 
-**Comparison table MUST cover all four pillars:** Security, Cost, Efficiency, Stability.
+**Comparison table MUST cover all five pillars:** Security, Stability, Cost, Efficiency (ops workflow), Performance (runtime characteristics).
 
 Wait for user selection before proceeding to detailed design.
 
@@ -734,6 +901,8 @@ After the user selects an option, produce complete design:
 5. **Security Design** — RAM roles, encryption, network isolation, access control
 6. **Cost Estimate** — Itemized monthly costs + total
 7. **Stability Design** — HA, backup, recovery RPO/RTO
+8. **Efficiency Design** — IaC management, monitoring, deployment automation, logging strategy
+9. **Performance Design** — Capacity planning, caching, read/write split, CDN, APM, scaling triggers
 
 **Use MCP to validate design:**
 
@@ -748,31 +917,63 @@ AlibabaCloud___SearchDocument: query="RDS MySQL instance type mysql.n2.small.2c 
 AlibabaCloud___CallCLI: "aliyun ecs DescribeImages --ImageOwnerAlias system --OSType linux"
 ```
 
-#### 3c. Four-Pillar Design Review
+#### 3c. Five-Pillar Design Review
 
-After design is complete, automatically perform a quick four-pillar review:
+After design is complete, automatically perform a quick five-pillar review:
 
 ```markdown
-## Four-Pillar Design Review
+## Five-Pillar Design Review
 
 ### Security ✅/⚠️
 - [x] Security group rules minimized (no 0.0.0.0/0 on SSH)
 - [x] Database only accessible within VPC
 - [ ] ⚠️ RDS TDE not enabled (recommend enabling)
 
-### Cost ✅
-- Estimated monthly: ¥1,200
-- Using pay-as-you-go with auto scaling optimization
-
-### Efficiency ✅
-- cloud_essd PL1 provides sufficient IOPS
-- Auto scaling handles peak loads
-
 ### Stability ✅/⚠️
 - [x] ECS multi-AZ deployment
 - [x] RDS High-Availability Edition (dual AZ)
 - [ ] ⚠️ Cross-region backup not configured (not needed for current requirements)
+
+### Cost ✅
+- Estimated monthly: ¥1,200
+- Using pay-as-you-go with auto scaling optimization
+
+### Efficiency ✅ (ops workflow)
+- Terraform + IaC Service remote execution (via spec-ops pipeline)
+- 默认云监控告警 — 满足分钟级响应需求
+- SLS 集中日志归集 (生产推荐)
+
+### Performance ✅ (runtime characteristics)
+- cloud_essd PL1 provides sufficient IOPS
+- Auto scaling handles peak loads (CPU > 70% → scale out)
+- 单 AZ 内部延迟 < 1ms; 跨 AZ 平均 ~2ms — 符合 web 应用需求
 ```
+
+#### 3c.5. Governance Baseline Cross-Check (mode-aware)
+
+After the Five-Pillar Design Review, perform a mode-aware cross-check against the CAF 4 governance baselines (身份权限 / 数据安全 / 通用安全 / 业务连续性). Authoritative check list, modes, repair snippets all live in [`references/governance-baselines.md`](references/governance-baselines.md).
+
+**Mode-aware behavior** (recap of [Mode-Aware Behavior Matrix](#mode-aware-behavior-matrix)):
+
+| Mode + Environment | Behavior | Check set |
+|---|---|---|
+| Full Mode + 生产 | **Hard gate** (can block Phase 5 confirm) | 12 项核心必查 |
+| Full Mode + dev/test | Advisory checklist (⚠️ flags, non-blocking) | 12 项核心必查 |
+| Fast Track + 生产 | Advisory (⚠️ flags, non-blocking) | 6 项 MVP |
+| Fast Track + dev/test | Skip | — |
+
+**Production-environment signal**: see definition in Mode-Aware Behavior Matrix above. When in doubt, treat as production.
+
+**Procedure**:
+
+1. Walk every applicable item in [`references/governance-baselines.md`](references/governance-baselines.md) against the proposed design.
+2. Group results into ✅ PASS / ⚠️ ADVISORY / ❌ FAIL.
+3. **Full Mode + 生产 + ANY ❌**: use `AskUserQuestion` to gate Phase 5:
+   - "调整设计修复 fail 项 (回到 Phase 3b 改方案)" — recommended
+   - "了解风险并按当前设计继续 (在 design.md Decisions Log 留痕)"
+   Do NOT proceed to Phase 5 until the user explicitly resolves.
+4. **Other combinations**: append ⚠️ items to the design summary;do not block.
+5. Always write the result to design.md `## Governance Baseline Cross-Check` block (see Design Document Template below) AND queue it for `status.json.governance_baseline_check` (`writing-plans` will write this — see [`../alibabacloud-writing-plans/references/directory-structure.md`](../alibabacloud-writing-plans/references/directory-structure.md) for schema).
 
 ### Phase 4: Architecture Visualization (Optional, FULL MODE ONLY)
 
@@ -988,6 +1189,11 @@ After the call returns, tell the user explicitly:
 ## Requirements
 {Confirmed requirement list from Phase 1}
 
+## Scenario Context
+{If Phase 1 hit any advisor scenarios (等保 / AI / 出海 / 多账号 / 加密 / 容灾),
+ list them here along with the advisor sections referenced. Day-2 sessions
+ inherit this context. Format: "- 等保三级 → advisor/caf-knowledge-base.md § 5"}
+
 ## Architecture
 
 ### Resource List
@@ -1008,22 +1214,40 @@ After the call returns, tell the user explicitly:
 | **Total** | | **¥X,XXX** |
 
 ## Decisions Log
-| Decision | Choice | Rationale (Four Pillars) |
+| Decision | Choice | Rationale (Five Pillars) |
 |----------|--------|--------------------------|
-| ... | ... | Security:... Cost:... Efficiency:... Stability:... |
+| ... | ... | Security:... Stability:... Cost:... Efficiency:... Performance:... |
 
-## Four-Pillar Review
+## Five-Pillar Review
+
 ### Security
 {Security design highlights and review results}
+
+### Stability
+{High availability and disaster recovery design + RTO / RPO targets}
 
 ### Cost
 {Cost optimization strategies and estimates}
 
-### Efficiency
-{Performance design and bottleneck analysis}
+### Efficiency (research / ops workflow)
+{IaC, CI/CD, monitoring, observability, deployment automation design}
 
-### Stability
-{High availability and disaster recovery design}
+### Performance (runtime characteristics)
+{Capacity planning, caching, read/write split, CDN, APM, scaling triggers}
+
+## Governance Baseline Cross-Check
+
+**Mode**: Full Mode | Fast Track
+**Environment**: production | dev/test
+**Result**: PASS X/Y (Z ⚠️ acknowledged)
+
+| # | Baseline | Status | Note |
+|---|----------|--------|------|
+| A1 | 主账号 AK 不出现 | ✅ | — |
+| A3 | SG 高危端口 | ⚠️ acknowledged | {User-acknowledged risk rationale, if any} |
+| ... | ... | ... | ... |
+
+> If Fast Track + dev/test, this block reads: "Skipped — Fast Track dev/test 不做基线 cross-check"
 ```
 
 ---
@@ -1038,6 +1262,8 @@ After the call returns, tell the user explicitly:
   "name": "{requirement-name}",
   "status": "designed",
   "change_type": "create",
+  "mode": "full | fast-track",
+  "environment": "production | dev-test",
   "created_at": "{ISO timestamp}",
   "updated_at": "{ISO timestamp}",
   "phases": {
@@ -1051,7 +1277,16 @@ After the call returns, tell the user explicitly:
     "last_plan_at": null,
     "last_apply_at": null,
     "last_destroy_at": null
-  }
+  },
+  "governance_baseline_check": {
+    "mode": "full-12 | fast-mvp-6 | dev-advisory | skipped",
+    "result": "pass | partial | not-run",
+    "checked_at": "{ISO timestamp}",
+    "items": [
+      { "id": "A1", "status": "pass | fail | advisory", "note": "..." }
+    ]
+  },
+  "scenario_context": ["等保三级", "AI 应用"]
 }
 ```
 
@@ -1060,6 +1295,12 @@ do NOT overwrite the `state` object — read it, preserve every field, set
 `change_type` to `"modify"`, and update only `status` + `updated_at`.
 `executing-plans` is the sole writer of `state.*` fields after the initial
 scaffold here.
+
+`governance_baseline_check` is written here at the end of Phase 3c.5
+(planning is the producer). Day-2 sessions read prior result to compare,
+then overwrite with the new check result. `scenario_context` accumulates
+matched scenarios across Day-1 + Day-2 — never shrinks unless a scenario
+is explicitly dropped from design.md.
 
 See [`../alibabacloud-writing-plans/references/directory-structure.md` → Status JSON Schema](../alibabacloud-writing-plans/references/directory-structure.md) for the full schema reference.
 
@@ -1113,7 +1354,7 @@ Present the design summary and immediately proceed:
 >
 > - Resources: {N}
 > - Estimated monthly cost: ¥{cost}
-> - Four-pillar assessment: Security ✅ | Cost ✅ | Efficiency ✅ | Stability ✅
+> - Five-pillar assessment: Security ✅ | Stability ✅ | Cost ✅ | Efficiency ✅ | Performance ✅
 >
 > Now generating the implementation code..."
 
@@ -1140,7 +1381,7 @@ confirmation.
 
 - **You are an expert, not a search engine** — Give recommendations with rationale for every decision; never present neutral lists
 - **MCP is your backbone** — For any uncertainty about specs, pricing, or availability, immediately query MCP for real-time data
-- **Four pillars throughout** — Security / Cost / Efficiency / Stability, from clarification to final design
+- **Five pillars throughout** — Security / Stability / Cost / Efficiency / Performance, from clarification to final design (aligned with Alibaba Cloud Well-Architected Framework)
 - **Proactive brainstorming** — Don't just answer what users ask; help them think of what they haven't asked (within scope)
 - **One question at a time** — Don't overwhelm users with a wall of questions
 - **Data-driven** — Use MCP tools for real-time data; don't guess from memory
@@ -1159,3 +1400,6 @@ confirmation.
 | Vaguely say "recommend using best practices" | Not specific, not actionable | "Use cloud_essd PL1 instead of cloud_efficiency — your DB workload has high IOPS demand" |
 | Give spec recommendations without querying MCP | May be outdated or inaccurate | Query IaCService/Document first, then recommend |
 | Expand into DR/multi-region/Serverless without user asking | Diverges from user's goal | Only raise when directly relevant to stated requirements |
+| Force enterprise-LZ scope into single-workload planning | Mixes incompatible scopes; planning becomes bloated and Day-2 state corrupted | Phase 0.0 detects enterprise keywords and delegates to `alibabacloud-itgov-advisor` first |
+| Treat production with Fast Track + zero baseline check | Silent compliance violations ship to prod | Production always gets at minimum the 6-item MVP advisory; Full Mode + production gets the 12-item hard gate |
+| Conflate Pillar 4 (Efficiency, ops workflow) with Pillar 5 (Performance, runtime) | Misleads recommendations — ops folks get APM advice they don't need; app engineers get IaC advice that doesn't help them | Keep the split per Phase 2 rules; Efficiency = research/ops, Performance = runtime characteristics |
