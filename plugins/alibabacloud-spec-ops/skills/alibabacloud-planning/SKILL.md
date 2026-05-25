@@ -505,6 +505,7 @@ After specs are confirmed, ask **each pillar one targeted question** in a single
 
 **Rules for this step:**
 
+- **Render as markdown prose with numbered list — do NOT use `AskUserQuestion`.** `AskUserQuestion` has a hard max of 4 items per call; the 5-pillar quick round exceeds that. Prose form lets the user reply in a single free-form message ("1A 2B 3 默认 4A 5 QPS<100").
 - 5 questions in ONE message, user replies in ONE round
 - Each question is a **single choice or short answer**, not open-ended exploration
 - If user says "默认" / "都行" for any pillar → use best-practice defaults for that pillar
