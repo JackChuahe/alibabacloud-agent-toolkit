@@ -4,7 +4,7 @@ description: "Convert approved infrastructure designs into Terraform HCL code an
 license: MIT
 metadata:
   author: Alibaba Cloud
-  version: "0.4.0"
+  version: "0.5.0"
 ---
 
 # Alibaba Cloud Writing Plans
@@ -103,18 +103,20 @@ Resources to generate:
 ...
 ```
 
-### Step 2: Invoke terraform-codegen Skill
+### Step 2: Atomic Two-Skill Sequence — codegen → validate
 
-**CRITICAL: You MUST invoke the `Skill` tool with `alibabacloud-spec-ops:alibabacloud-terraform-codegen` here.**
+> **WARNING — REGRESSION SCENARIO (most common spec-ops bug).** Agent
+> invokes codegen, sees its polished Step 7 summary (with `Files written: …`,
+> `Validation: …`, implementation notes), treats it as a terminal output,
+> prints a closing paragraph, and stops. User has to type "继续" to unstick
+> the chain. **Sub-step 2.3 below is the single most important instruction
+> in this skill — do not skip it.**
+>
+> Treat Step 2 as ONE atomic compound action of three sub-steps, ALL
+> executed in the same turn. Both Skill calls (2.1 codegen, 2.3 validate)
+> must happen with no user-input pause between them.
 
-The terraform-codegen skill will:
-
-1. Query IaCService for supported products and resource type schemas
-2. Consult Alibaba Cloud documentation for correct attribute names and values
-3. Generate production-quality HCL with proper data sources, variables, and outputs
-4. Verify attribute correctness against real API schemas
-
-**How to invoke:**
+#### Step 2.1 — Invoke terraform-codegen
 
 Use the `Skill` tool:
 
@@ -123,7 +125,7 @@ Skill:
   skill: "alibabacloud-spec-ops:alibabacloud-terraform-codegen"
 ```
 
-Then provide the terraform-codegen skill with a clear instruction based on the design:
+Provide the terraform-codegen skill with a clear instruction based on the design:
 
 > "Based on the following design, generate complete Terraform HCL code for Alibaba Cloud:
 >
@@ -140,30 +142,65 @@ Then provide the terraform-codegen skill with a clear instruction based on the d
 > IMPORTANT: Output ALL code in a single main.tf file. Do NOT split into separate files.
 > File internal order: terraform {} → provider → variables → locals → data → resources → outputs"
 
-### Step 3: Verify codegen output (codegen already wrote the file)
+terraform-codegen will:
 
-`terraform-codegen` is the **producer** of the .tf file — it wrote
-`main.tf` itself during its Step 6 and reported `Files written: ...` in
-its Step 7 summary. Do NOT re-write or duplicate; this step is a
-smoke-check on the producer's output:
+1. Query IaCService for supported products and resource type schemas
+2. Consult Alibaba Cloud documentation for correct attribute names and values
+3. Generate production-quality HCL with proper data sources, variables, and outputs
+4. Verify attribute correctness against real API schemas
+5. Write `main.tf` itself (it is the producer — do NOT re-write in 2.2)
+6. Emit a Step 7 summary back to you
 
-- Confirm `.aliyun-ai-ops-spec/{name}/designs/terraform/main.tf` exists
-- Confirm codegen's Step 7 reported `Validation: iacservice validate-module: ok` (or accepted SKIPPED/FAILED with diagnostics)
-- Confirm single-file constraint: no `variables.tf` / `outputs.tf` / `locals.tf` sibling files
+#### Step 2.2 — On codegen's return: smoke check + record progress + transition
 
-If any check fails, surface the issue to the user and stop — do NOT
-auto-chain to validate on broken codegen output.
+The moment the Skill call from 2.1 returns to your context:
 
-**File contract that codegen enforces** (recap, for verification only):
+1. **Smoke-check codegen output** (don't re-write, codegen already did):
+   - Confirm `.aliyun-ai-ops-spec/{name}/designs/terraform/main.tf` exists
+   - Confirm codegen reported `Validation: iacservice validate-module: ok` (or accepted SKIPPED / FAILED with diagnostics — codegen already retried 3× on FAIL)
+   - Confirm single-file constraint: no `variables.tf` / `outputs.tf` / `locals.tf` siblings
+   - If smoke-check fails, STOP here — surface the issue and do NOT chain to validate on broken output
+2. **Update TODO list via `TodoWrite`** (signals progress to user):
+   - Mark **"生成 Terraform 代码"** → `completed`
+   - Mark **"双轨评审：spec compliance + code quality"** → `in_progress`
+3. **Update `tasks/status.json` to `status: "plans-written"`** — silently, do NOT mention to user
+4. **Print exactly ONE short user-facing transition paragraph** (no question, no closing):
 
-- All Terraform code in one `main.tf` — never split
-- Internal ordering: `terraform {}` → `provider` → `variables` → `locals` → `data sources` → `resources` → `outputs`
-- Every `variable` has a `default` value
-- Reason: IaC Service remote execution takes a single template body
+   > "Terraform code generated successfully — `main.tf` ({N} resources,
+   > {M} variables, {K} outputs).
+   >
+   > Now running review (spec compliance + code quality)..."
 
-### Step 4: Generate CLI Scripts (if needed)
+#### Step 2.3 — IMMEDIATELY invoke alibabacloud-validate (REGRESSION-CRITICAL)
 
-For operations not supported by Terraform, create CLI scripts in `.aliyun-ai-ops-spec/{name}/designs/cli/`:
+**Your very next tool call, right after the transition paragraph from
+2.2, MUST be:**
+
+```
+Skill:
+  skill: "alibabacloud-spec-ops:alibabacloud-validate"
+```
+
+**Self-check at this exact moment**: if your next planned action is
+anything other than the `Skill` call above — writing another paragraph,
+summarizing, pausing for `继续`, "letting the user decide", emitting
+`Baked for …` and stopping — **you are inside the regression bug**. The
+Skill call is mandatory; the transition paragraph in 2.2 is the only
+user-facing text allowed between codegen and validate.
+
+Hard rules:
+
+- DO NOT wait for user input — validate is read-only, no cloud changes, no cost; the user's next real decision is at validate's exit (deploy or not)
+- DO NOT write a closing paragraph after the transition
+- DO NOT treat codegen's Step 7 summary as a stopping point — it is a mid-pipeline checkpoint, not an endpoint
+- DO NOT skip 2.2's transition just to "save a turn" — the user needs to see what's happening
+- DO NOT think "the user will type 继续 if they want to proceed" — the previous two regression incidents are exactly this
+
+### Step 3: Generate CLI Scripts (if needed, optional)
+
+This step is independent of the codegen → validate chain and may run
+either now (before validate) or after the full pipeline. For operations
+not supported by Terraform, create CLI scripts in `.aliyun-ai-ops-spec/{name}/designs/cli/`:
 
 ```bash
 #!/bin/bash
@@ -180,9 +217,7 @@ aliyun <service> <operation> --<args>
 - Operations with no Terraform resource support
 - Verification commands (e.g., check DNS propagation)
 
-### Step 5: Update Internal State
-
-Silently update `.aliyun-ai-ops-spec/{name}/tasks/status.json` to `status: "plans-written"`. **Do NOT mention this to the user.**
+In the common case (no extra CLI work needed), skip this step entirely.
 
 ---
 
@@ -203,43 +238,25 @@ The `terraform-codegen` skill provides capabilities that inline generation canno
 
 ---
 
-## Continuation Contract — MANDATORY, execute IMMEDIATELY when Step 2's Skill call returns
+## After validate returns
 
-> **TRIGGER**: the moment the `Skill: alibabacloud-spec-ops:alibabacloud-terraform-codegen` call returns to your context. terraform-codegen's Step 7 summary (`Files written: …` + `Validation: …` + implementation notes) is **NOT a stopping point** — it is the cue to continue. Treating it as terminal and waiting for user input is a **bug** (this skill's most common regression).
->
-> Execute Steps 3 → 4 → 5 → the items below, in that order, in the same turn, without pausing for user input. The auto-chain to `alibabacloud-validate` is mandatory and unconditional unless Step 3's smoke-check failed.
+validate runs spec-reviewer + code-quality-reviewer in parallel, then
+prompts the user for the deploy decision (its own user gate). When
+validate's Skill call returns to this skill's context, writing-plans is
+**done** — no further action required from this skill. The execute /
+deploy chain is owned by `alibabacloud-validate` → `alibabacloud-executing-plans`.
 
-After Step 3's smoke-check passes:
-
-1. Update the user-facing TODO list via `TodoWrite`:
-   - Mark **"生成 Terraform 代码"** → `completed`
-   - Mark **"双轨评审：spec compliance + code quality"** → `in_progress`
-2. Inform user of the result (one paragraph, no question):
-
-> "Terraform code generated successfully.
->
-> Generated: `main.tf` — {N} resources, {M} variables, {K} outputs (all in single file)
->
-> Code was generated with resource schemas verified via IaCService API.
->
-> Now running review (spec compliance + code quality)..."
-
-1. **Immediately and automatically invoke `alibabacloud-spec-ops:alibabacloud-validate` via the `Skill` tool** — do NOT stop to ask the user. Validation is read-only (no cloud changes, no cost) and the next user-facing decision is whether to deploy, which `alibabacloud-validate` itself gates. **Emitting only the "Now running review…" paragraph without then invoking the Skill is the regression bug — the Skill call MUST happen in the same turn.**
-
-**Do NOT:**
-
-- Ask "Would you like to proceed with validation?" — validation is not a decision the user needs to make
-- Mention status.json updates
-- Mention internal file paths for state tracking
-- Mention the terraform-codegen delegation details (implementation detail)
-- Stop after printing the "Now running review…" paragraph — that paragraph is only a user-facing transition note; the actual `Skill` invocation must follow in the same turn
-- Treat any `※ recap:` or session-summary line that mentions "next step" as substitute action — it's commentary, not execution
+Do NOT add a closing paragraph after validate returns;the conversation
+has moved into validate's user-gate dialog and any extra text from this
+skill is noise.
 
 ---
 
 ## Anti-Patterns (FORBIDDEN)
 
 - ❌ Generating HCL code directly without invoking terraform-codegen
+- ❌ **Stopping after codegen's Step 7 summary** — this is the most common regression; codegen is a midpoint, the chain MUST continue to validate in the same turn (see Step 2.3)
+- ❌ **Asking the user "继续?" / "proceed with validation?" between codegen and validate** — validation is read-only, no user decision needed
 - ❌ Guessing resource attribute names from memory
 - ❌ Using hardcoded values instead of variables
 - ❌ Skipping IaCService schema verification
