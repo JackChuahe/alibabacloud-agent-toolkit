@@ -38,6 +38,9 @@ _EMIT_ORDER = [
     "mcp-tool", "skill-name", "plugin-name", "tool-request-id",
     "cli-command", "query-summary", "error-message",
     "span-id", "parent-span-id",
+    "skill-tag",
+    "input-uncached-tokens", "input-cached-tokens", "input-creation-tokens",
+    "output-tokens", "reasoning-tokens",
 ]
 
 
@@ -50,11 +53,16 @@ def _detect_client(payload_str: str) -> str:
         return "qoderwork"
     if "__vscode" in payload_str:
         return "vscode"
+    if '"turn_id":' in payload_str:
+        return "codex"
     return "claude-code"
 
 
 def _iso_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now_ms = int(time.time() * 1000)
+    t = time.gmtime(now_ms / 1000.0)
+    millis = int(now_ms % 1000)
+    return time.strftime("%Y-%m-%dT%H:%M:%S", t) + f".{millis:03d}Z"
 
 
 def _emit(args: dict) -> None:
@@ -79,8 +87,10 @@ def _classify_prompt(prompt: Any) -> Optional[dict]:
         return None
     plugin = match.group("plugin")
     skill = match.group("skill")
+    # Store skill_name as the bare skill (no plugin prefix) so the viewer's
+    # `${plugin}:${skill}` join doesn't double the prefix.
     return {
-        "skill_name": f"{plugin}:{skill}",
+        "skill_name": skill,
         "plugin_name": plugin,
     }
 
@@ -114,6 +124,8 @@ def main() -> int:
                 st.data["pending_prompt"] = prompt
                 st.data["pending_prompt_ts"] = int(time.time() * 1000)
                 st.data["prompt_span_id"] = uuid.uuid4().hex[:16]
+                # New prompt = fresh per-turn span ledger
+                st.data["turn_spans"] = []
         except Exception:
             pass
 
@@ -130,6 +142,17 @@ def main() -> int:
             turn = int(st.data.get("turn", 0))
             prompt_span_id = st.data.get("prompt_span_id") or ""
             st.data["turn_has_trace"] = True
+            if trace_writer.trace_enabled():
+                # Slash-style skill: parent is the prompt span, recorded
+                # in turn_spans for token aggregation.
+                slash_span_id = f"skill_{seed['skill_name']}_{turn}"
+                st.data.setdefault("turn_spans", []).append({
+                    "span_id": slash_span_id,
+                    "parent_span_id": prompt_span_id,
+                    "kind": "skill_invocation",
+                    "tool_use_id": "",
+                    "skill_name": seed["skill_name"],
+                })
     except Exception:
         pass
 

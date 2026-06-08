@@ -20,6 +20,34 @@ import trace_writer  # noqa: E402
 
 PLUGIN_PREFIX = "alibabacloud"
 STDIN_CAP = 65536
+QODERWORK_MCP_WRAPPERS = ("qw_mcp_call", "qw_mcp_get")
+
+# Aliyun CLI invocation: matches `aliyun ...` at start of command OR
+# after a shell separator (`&&`, `||`, `;`, `|`, `\n`, `(`), with optional
+# `ENV=val` prefixes and optional path prefix (e.g. `/usr/local/bin/aliyun`).
+# Word-bounded (excludes `aliyun-cli`, `myaliyun`, `cat /var/log/aliyun.log`).
+# Kept in sync with post_handler.ALIYUN_INVOCATION_RE.
+ALIYUN_INVOCATION_RE = re.compile(
+    r"(?:^|[;&|\n(])"
+    r"\s*"
+    r"(?:[A-Z][A-Z0-9_]*=\S+\s+)*"
+    r"(?:[^\s;&|]*/)?"
+    r"aliyun"
+    r"(?=\s|$|[;&|])"
+)
+
+
+def normalize_tool_call(tool_name: str, tool_input):
+    """Unwrap QoderWork MCP wrapper payloads into the inner MCP tool shape."""
+    if tool_name not in QODERWORK_MCP_WRAPPERS or not isinstance(tool_input, dict):
+        return tool_name, tool_input
+    inner_name = tool_input.get("toolName") or tool_input.get("tool_name") or ""
+    if not isinstance(inner_name, str) or not inner_name:
+        return tool_name, tool_input
+    inner_input = tool_input.get("arguments")
+    if not isinstance(inner_input, dict):
+        inner_input = {}
+    return inner_name, inner_input
 
 
 def read_stdin_bounded() -> bytes:
@@ -49,8 +77,11 @@ def is_ours_tool(tool_name: str, tool_input) -> bool:
         cmd = ""
         if isinstance(tool_input, dict):
             cmd = tool_input.get("command", "") or ""
-        if isinstance(cmd, str) and re.match(r"^\s*aliyun(\s|$)", cmd):
-            return True
+        if isinstance(cmd, str):
+            if ALIYUN_INVOCATION_RE.search(cmd):
+                return True
+            if re.search(r"/skills/[A-Za-z0-9_-]+/SKILL\.md\b", cmd) and PLUGIN_PREFIX in cmd.lower():
+                return True
     return False
 
 
@@ -95,6 +126,8 @@ def _detect_client(payload_str: str) -> str:
         return "qoderwork"
     if "__vscode" in payload_str:
         return "vscode"
+    if '"turn_id":' in payload_str:
+        return "codex"
     return "claude-code"
 
 
@@ -118,6 +151,7 @@ def main() -> int:
         return 0
     tool_name = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
+    tool_name, tool_input = normalize_tool_call(tool_name, tool_input)
     session_id = data.get("session_id") or ""
     tool_use_id = data.get("tool_use_id") or ""
     if not is_ours_tool(tool_name, tool_input):
@@ -135,19 +169,53 @@ def main() -> int:
     key = tool_use_id or _sanitize_tool_name(tool_name)
     parent_span = None
     turn = 0
+    is_duplicate = False
     try:
         with SessionState(client, session_id) as st:
             st.data["tool_starts"][key] = int(time.time() * 1000)
             # --- Local trace: mark turn active, get parent span ---
             if trace_writer.trace_enabled():
                 st.data["turn_has_trace"] = True
-                parent_span = st.data.get("prompt_span_id")
-                turn = int(st.data.get("turn", 0))
+                this_span_id = tool_use_id or key
+                # Dedup: Claude fires PreToolUse twice for the same
+                # tool_use_id within one turn (symmetric with the
+                # PostToolUse dedup via posted_tool_use_ids). Skip the
+                # second fire so we neither write a duplicate tool_start
+                # event nor a duplicate turn_spans entry.
+                pre_seen = st.data.setdefault("pre_seen_ids", [])
+                if this_span_id and this_span_id in pre_seen:
+                    is_duplicate = True
+                else:
+                    if this_span_id:
+                        pre_seen.append(this_span_id)
+                    # All tool spans parent directly to the prompt span.
+                    # Skill association is content-based — see post_handler
+                    # ._path_skill_tag (matches the bash command's UA env
+                    # or skills/<name>/ path) — never inferred from temporal
+                    # proximity within a turn.
+                    parent_span = st.data.get("prompt_span_id")
+                    turn = int(st.data.get("turn", 0))
+                    # Record this span for end-of-turn token aggregation
+                    st.data.setdefault("turn_spans", []).append({
+                        "span_id": this_span_id,
+                        "parent_span_id": parent_span,
+                        "kind": "tool",
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                    })
     except Exception:
         pass
 
     # --- Local trace: write tool_start event ---
-    if trace_writer.trace_enabled() and session_id:
+    # Skill is suppressed: post_handler emits a single skill_invocation
+    # event that subsumes both start and end, keeping the trace tidy and
+    # avoiding an orphan tool_start with no matching tool_end.
+    if (
+        trace_writer.trace_enabled()
+        and session_id
+        and not is_duplicate
+        and tool_name not in ("Skill", "skill")
+    ):
         try:
             now_ms = int(time.time() * 1000)
             trace_writer.append_trace(client, session_id, {

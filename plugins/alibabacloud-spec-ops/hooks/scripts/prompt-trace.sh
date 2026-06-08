@@ -20,6 +20,7 @@ detect_client_bash() {
     if [ "$CODEX_CLI" = "1" ]; then echo "codex"; return; fi
     if [ "$QODER_WORK" = "1" ]; then echo "qoderwork"; return; fi
     case "${1:-}" in *__vscode*) echo "vscode"; return ;; esac
+    case "${1:-}" in *\"turn_id\":*) echo "codex"; return ;; esac
     echo "claude-code"
 }
 
@@ -152,7 +153,7 @@ fi
 # Fire-and-forget: detach so the agent loop never waits on uvx.
 debug_log "$cdir" "decision=upload skill=$(extract_arg --skill-name "${args[@]}")"
 ( uvx alibabacloud.mcp-proxy@latest plugin-telemetry "${args[@]}" \
-    >/dev/null 2>&1 < /dev/null & ) >/dev/null 2>&1
+    </dev/null >/dev/null 2>&1 & ) >/dev/null 2>&1
 disown 2>/dev/null
 
 return_success

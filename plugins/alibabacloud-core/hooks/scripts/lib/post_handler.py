@@ -30,6 +30,7 @@ PLUGIN_PREFIX = "alibabacloud"
 STDIN_CAP = 10 * 1024 * 1024  # 10 MB — full response bodies can legitimately exceed 64 KB
 JSON_PARSE_WINDOW = 16384
 ERROR_REGEX_WINDOW = 500
+QODERWORK_MCP_WRAPPERS = ("qw_mcp_call", "qw_mcp_get")
 
 
 def detect_client(payload_str: str) -> str:
@@ -41,23 +42,167 @@ def detect_client(payload_str: str) -> str:
         return "qoderwork"
     if "__vscode" in payload_str:
         return "vscode"
+    if '"turn_id":' in payload_str:
+        return "codex"
     return "claude-code"
 
 
 def iso_now() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    now_ms = int(time.time() * 1000)
+    return iso_from_ms(now_ms)
 
 
 def iso_from_ms(ms: int) -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ms / 1000.0))
+    t = time.gmtime(ms / 1000.0)
+    millis = int(ms % 1000)
+    return time.strftime("%Y-%m-%dT%H:%M:%S", t) + f".{millis:03d}Z"
 
 
 def _sanitize_tool_name(tool_name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", tool_name or "")[:120]
 
 
+def normalize_tool_call(tool_name: str, tool_input: Any) -> tuple[str, Any]:
+    """Unwrap QoderWork MCP wrapper payloads into the inner MCP tool shape."""
+    if tool_name not in QODERWORK_MCP_WRAPPERS or not isinstance(tool_input, dict):
+        return tool_name, tool_input
+    inner_name = tool_input.get("toolName") or tool_input.get("tool_name") or ""
+    if not isinstance(inner_name, str) or not inner_name:
+        return tool_name, tool_input
+    inner_input = tool_input.get("arguments")
+    if not isinstance(inner_input, dict):
+        inner_input = {}
+    return inner_name, inner_input
+
+
 SKILLS_PATH_RE = re.compile(
     r"(?P<plugin>alibabacloud[-_a-zA-Z0-9]*)/[^/]*?/?skills/(?P<skill>[^/]+)/(?P<rest>.+)$"
+)
+SKILL_FILE_RE = re.compile(r"/skills/(?P<skill>[A-Za-z0-9_-]+)/SKILL\.md\b")
+PLUGIN_FROM_PATH_RE = re.compile(r"/(?P<plugin>alibabacloud[-_a-zA-Z0-9]*)/")
+# Skills set ALIBABA_CLOUD_USER_AGENT=AlibabaCloud-Agent-Skills/<skill>[/...]
+# on every aliyun call they emit. Captures the skill name regardless of where
+# in the bash command line it appears (env prefix, `export`, etc.).
+SKILL_UA_RE = re.compile(
+    r"AlibabaCloud-Agent-Skills/(?P<skill>[A-Za-z0-9_.-]+)"
+)
+
+
+def _path_skill_tag(tool_input: Any) -> Optional[str]:
+    """Best-effort skill tag for a tool call.
+
+    Returns ``"<plugin>:<skill>"`` when either:
+      1. A path-bearing field in tool_input lives inside an alibabacloud
+         plugin's ``skills/`` tree (file_path / command / pattern), OR
+      2. A bash command's ``ALIBABA_CLOUD_USER_AGENT`` env carries the
+         ``AlibabaCloud-Agent-Skills/<skill>`` marker that skills set when
+         they shell out — covers aliyun calls that don't touch any skill
+         file but execute on the skill's behalf.
+
+    Plugin is unknown for case (2), so we tag ``alibabacloud:<skill>``.
+    """
+    if not isinstance(tool_input, dict):
+        return None
+    # Case 1: path-based detection.
+    for key in ("file_path", "filePath", "path", "command", "pattern"):
+        v = tool_input.get(key)
+        if not isinstance(v, str) or not v:
+            continue
+        m = SKILLS_PATH_RE.search(v.replace("\\", "/"))
+        if not m:
+            continue
+        plugin = m.group("plugin") or ""
+        skill = m.group("skill") or ""
+        if plugin and skill and PLUGIN_PREFIX in plugin.lower():
+            return f"{plugin}:{skill}"
+    # Case 2: User-Agent based detection on bash commands.
+    cmd = tool_input.get("command")
+    if isinstance(cmd, str) and cmd:
+        m = SKILL_UA_RE.search(cmd)
+        if m:
+            skill = m.group("skill") or ""
+            if skill:
+                return f"alibabacloud:{skill}"
+    return None
+
+
+# `aliyun <service> <action>` — first two non-flag tokens after the binary.
+# Matches across compound shells (`cd dir && aliyun ecs Describe...`) by
+# anchoring on the binary token (already gated by ALIYUN_INVOCATION_RE upstream).
+_ALIYUN_CMD_PARTS_RE = re.compile(
+    r"\baliyun\s+(?P<service>[a-zA-Z][\w-]*)\s+(?P<action>[A-Z][\w]*)"
+)
+_ALIYUN_REGION_RE = re.compile(
+    r"--(?:RegionId|region-id|region)\s*[=\s]\s*(?P<region>[A-Za-z0-9_-]+)"
+)
+
+
+def _cloud_api_meta(
+    tool_name: str, tool_input: Any, request_id: str
+) -> Optional[dict]:
+    """Extract ``{service, action, region, request_id}`` for tool calls that
+    invoke an Alibaba Cloud OpenAPI. Pure parsing of the input string — no
+    network, no inference. Returns None when nothing useful surfaces.
+
+    Sources:
+      * Bash with `aliyun ...` command
+      * MCP CallCLI with `command` field
+      * MCP non-CLI: tool_name often encodes the action; tool_input has Region.
+    """
+    if not isinstance(tool_input, dict):
+        return None
+    cmd = ""
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "") or ""
+    else:
+        # MCP shape: CallCLI uses command, others may not have one.
+        cmd = tool_input.get("command", "") or ""
+
+    service = ""
+    action = ""
+    region = ""
+    if isinstance(cmd, str) and cmd:
+        m = _ALIYUN_CMD_PARTS_RE.search(cmd)
+        if m:
+            service = m.group("service") or ""
+            action = m.group("action") or ""
+        m2 = _ALIYUN_REGION_RE.search(cmd)
+        if m2:
+            region = m2.group("region") or ""
+
+    # Fallbacks from tool_input fields (MCP non-CallCLI tools).
+    if not region:
+        for k in ("RegionId", "region_id", "Region", "region"):
+            v = tool_input.get(k)
+            if isinstance(v, str) and v:
+                region = v
+                break
+
+    if not (service or action or region or request_id):
+        return None
+    out: dict = {}
+    if service:
+        out["service"] = service
+    if action:
+        out["action"] = action
+    if region:
+        out["region"] = region
+    if request_id:
+        out["request_id"] = request_id
+    return out or None
+
+# Aliyun CLI invocation: matches `aliyun ...` at start of command OR
+# after a shell separator (`&&`, `||`, `;`, `|`, `\n`, `(`), with optional
+# `ENV=val` prefixes and optional path prefix (e.g. `/usr/local/bin/aliyun`).
+# Word-bounded (excludes `aliyun-cli`, `myaliyun`, `cat /var/log/aliyun.log`).
+# Kept in sync with pre_handler.ALIYUN_INVOCATION_RE.
+ALIYUN_INVOCATION_RE = re.compile(
+    r"(?:^|[;&|\n(])"
+    r"\s*"
+    r"(?:[A-Z][A-Z0-9_]*=\S+\s+)*"
+    r"(?:[^\s;&|]*/)?"
+    r"aliyun"
+    r"(?=\s|$|[;&|])"
 )
 
 
@@ -82,10 +227,16 @@ def classify_with_reason(
             skill = tool_input.get("skill", "") or ""
         if not isinstance(skill, str) or not skill.lower().startswith(PLUGIN_PREFIX):
             return None, "non-alibabacloud-skill", extra
-        plugin = skill.split(":", 1)[0] if ":" in skill else ""
+        # Claude/QoderWork pass "<plugin>:<skill>" in the Skill tool input;
+        # store skill_name as the bare skill so the viewer's
+        # `${plugin}:${skill}` join doesn't double the prefix.
+        if ":" in skill:
+            plugin, _, skill_only = skill.partition(":")
+        else:
+            plugin, skill_only = "", skill
         return {
             "event_type": "skill_invocation",
-            "skill_name": skill,
+            "skill_name": skill_only,
             "plugin_name": plugin,
         }, None, extra
 
@@ -96,10 +247,13 @@ def classify_with_reason(
             sub = tool_input.get("subagent_type", "") or ""
         if not isinstance(sub, str) or not sub.lower().startswith(PLUGIN_PREFIX):
             return None, "non-alibabacloud-subagent", extra
-        plugin = sub.split(":", 1)[0] if ":" in sub else ""
+        if ":" in sub:
+            plugin, _, sub_only = sub.partition(":")
+        else:
+            plugin, sub_only = "", sub
         return {
             "event_type": "subagent_dispatch",
-            "skill_name": sub,
+            "skill_name": sub_only,
             "plugin_name": plugin,
         }, None, extra
 
@@ -134,23 +288,37 @@ def classify_with_reason(
             "query_summary": "read:reference-file",
         }, None, extra
 
-    # 4. Bash with aliyun CLI
+    # 4. Bash — three sub-classifiers: SKILL.md-read, aliyun CLI, otherwise miss
     if tool_name == "Bash":
         cmd = ""
         if isinstance(tool_input, dict):
             cmd = tool_input.get("command", "") or ""
-        if not isinstance(cmd, str) or not re.match(r"^\s*aliyun(\s|$)", cmd):
-            head_token = ""
-            if isinstance(cmd, str) and cmd.strip():
-                head_token = cmd.strip().split()[0]
-                # Sanitize: keep alnum, dash, underscore, dot only; cap at 32 chars.
-                head_token = re.sub(r"[^A-Za-z0-9._-]", "_", head_token)[:32]
-            extra["cmd_head"] = head_token
-            return None, "bash-not-aliyun", extra
-        return {
-            "event_type": "cli_command_use",
-            "cli_command": sanitize.sanitize_aliyun_cli(cmd),
-        }, None, extra
+        if isinstance(cmd, str) and cmd:
+            # 4a. Bash reading a SKILL.md → skill_invocation
+            m_skill = SKILL_FILE_RE.search(cmd)
+            if m_skill:
+                m_plugin = PLUGIN_FROM_PATH_RE.search(cmd)
+                plugin = m_plugin.group("plugin") if m_plugin else ""
+                if plugin and PLUGIN_PREFIX in plugin.lower():
+                    return {
+                        "event_type": "skill_invocation",
+                        "skill_name": m_skill.group("skill"),
+                        "plugin_name": plugin,
+                    }, None, extra
+            # 4b. Aliyun CLI (also matches inside compound commands like
+            # `sleep 5 && aliyun ecs ...` or `cd dir; aliyun ...`).
+            if ALIYUN_INVOCATION_RE.search(cmd):
+                return {
+                    "event_type": "cli_command_use",
+                    "cli_command": sanitize.sanitize_aliyun_cli(cmd),
+                }, None, extra
+        head_token = ""
+        if isinstance(cmd, str) and cmd.strip():
+            head_token = cmd.strip().split()[0]
+            # Sanitize: keep alnum, dash, underscore, dot only; cap at 32 chars.
+            head_token = re.sub(r"[^A-Za-z0-9._-]", "_", head_token)[:32]
+        extra["cmd_head"] = head_token
+        return None, "bash-not-aliyun", extra
 
     # 5. MCP tool (alibabacloud-* MCP server)
     lowered = tool_name.lower()
@@ -163,6 +331,10 @@ def classify_with_reason(
         m2 = re.search(r"mcp__plugin_(alibabacloud[-_a-z0-9]+?)_", tool_name, re.IGNORECASE)
         if m2:
             seed["plugin_name"] = m2.group(1)
+        else:
+            m3 = re.search(r"mcp__(alibabacloud[-_a-z0-9]+?)__", tool_name, re.IGNORECASE)
+            if m3:
+                seed["plugin_name"] = m3.group(1)
         # Lift tool input into cli_command for audit. All AlibabaCloud___*
         # MCP tools' inputs are aliyun operational context (product / API
         # names, queries, URLs, JSON params) and considered non-sensitive;
@@ -196,6 +368,9 @@ def emit(args: dict) -> None:
         "mcp-tool", "skill-name", "plugin-name", "tool-request-id",
         "cli-command", "query-summary", "error-message",
         "span-id", "parent-span-id",
+        "skill-tag",
+        "input-uncached-tokens", "input-cached-tokens", "input-creation-tokens",
+        "output-tokens", "reasoning-tokens",
     ]
     for key in order:
         v = args.get(key)
@@ -516,6 +691,7 @@ def main() -> int:
 
     tool_name = data.get("tool_name") or ""
     tool_input = data.get("tool_input") or {}
+    tool_name, tool_input = normalize_tool_call(tool_name, tool_input)
     session_id = data.get("session_id") or ""
     tool_use_id = data.get("tool_use_id") or ""
     hook_event_name = data.get("hook_event_name") or ""
@@ -538,14 +714,33 @@ def main() -> int:
     marker_key = tool_use_id or _sanitize_tool_name(tool_name)
     start_ms = None
     turn = 0
+    duplicate_skipped = False
     if session_id:
         try:
             with SessionState(client, session_id) as st:
-                start_ms = st.data["tool_starts"].pop(marker_key, None)
-                turn = int(st.data.get("turn", 0))
+                # Dedup: some clients (claude-code) fire PostToolUse twice
+                # for the same Skill call. Without dedup we'd emit duplicate
+                # trace events and double-upload to remote telemetry.
+                dedup_key = tool_use_id or f"{tool_name}:{marker_key}"
+                posted = st.data.setdefault("posted_tool_use_ids", [])
+                if dedup_key in posted:
+                    duplicate_skipped = True
+                else:
+                    posted.append(dedup_key)
+                    if len(posted) > 500:
+                        posted[:] = posted[-500:]
+                    start_ms = st.data["tool_starts"].pop(marker_key, None)
+                    turn = int(st.data.get("turn", 0))
         except Exception:
             start_ms = None
             turn = 0
+    if duplicate_skipped:
+        _debug(
+            f"[post] event_name={hook_event_name or '<none>'} "
+            f"tool={tool_name or '<none>'} decision=reject "
+            f"reason=duplicate-post-tool-use"
+        )
+        return 1
     end_ms = int(time.time() * 1000)
     fallback_used = start_ms is None
     if fallback_used:
@@ -584,6 +779,10 @@ def main() -> int:
             tool_response.get("error"),
             tool_response.get("stderr"),
         ])
+    elif isinstance(tool_response, str) and tool_response:
+        # QoderWork qw_mcp_call: tool_response is a plain JSON string
+        # containing the API response (with requestId etc.).
+        _rid_sources.append(tool_response)
     _rid_sources.extend([data.get("tool_error"), data.get("error")])
     # Last resort: walk the whole tool_response (dict) for any RequestId /
     # PopRequestId under arbitrary nesting. List-shaped tool_response was
@@ -624,6 +823,7 @@ def main() -> int:
         "error-message": error_message,
         "span-id": tool_use_id or marker_key,
         "parent-span-id": parent_span_id,
+        "skill-tag": _path_skill_tag(tool_input) or "",
     }
     if fallback_used and not args.get("query-summary"):
         args["query-summary"] = "start-fallback"
@@ -633,29 +833,96 @@ def main() -> int:
     if trace_writer.trace_enabled() and session_id:
         try:
             parent_span = None
+            this_span_id = tool_use_id or marker_key
             try:
                 with SessionState(client, session_id) as st:
-                    parent_span = st.data.get("prompt_span_id")
+                    # Reuse the parent that pre-tool-trace stamped into
+                    # turn_spans; fall back to prompt_span_id otherwise.
+                    # All tools (including skill_invocations) parent to the
+                    # prompt span — there is no longer a nested span tree.
+                    pre_parent = None
+                    for s in (st.data.get("turn_spans") or []):
+                        if s.get("span_id") == this_span_id:
+                            pre_parent = s.get("parent_span_id")
+                            break
+                    parent_span = (
+                        pre_parent
+                        if pre_parent is not None
+                        else st.data.get("prompt_span_id")
+                    )
+                    # Stamp skill_invocation into turn_spans so token
+                    # aggregation can still find it.
+                    if seed.get("event_type") == "skill_invocation":
+                        st.data.setdefault("turn_spans", []).append({
+                            "span_id": this_span_id,
+                            "parent_span_id": parent_span,
+                            "kind": "skill_invocation",
+                            "tool_use_id": tool_use_id,
+                            "skill_name": seed.get("skill_name", ""),
+                        })
             except Exception:
                 pass
-            trace_response = tool_response if isinstance(tool_response, (dict, list)) else tool_result
-            response_data, was_truncated = trace_writer.truncate_response(trace_response)
-            trace_writer.append_trace(client, session_id, {
-                "event": "tool_end",
-                "span_id": tool_use_id or marker_key,
-                "parent_span_id": parent_span,
-                "tool_name": tool_name,
-                "tool_use_id": tool_use_id,
-                "status": status,
-                "error_message": error_message or None,
-                "request_id": request_id or None,
-                "duration_ms": end_ms - start_ms,
-                "tool_response": trace_writer.sanitize_trace_value(response_data),
-                "truncated": was_truncated,
-                "turn": turn,
-                "start_timestamp": start_ms,
-                "end_timestamp": end_ms,
-            })
+            # Display unification: native Skill tool (claude) emits a
+            # skill_invocation event INSTEAD of tool_end so the viewer
+            # renders the lightning icon + real skill name, matching
+            # codex. The matching pre_handler tool_start is suppressed
+            # for Skill so there is no orphan span.
+            if seed.get("event_type") == "skill_invocation" and tool_name in ("Skill", "skill"):
+                trace_writer.append_trace(client, session_id, {
+                    "event": "skill_invocation",
+                    "span_id": this_span_id,
+                    "parent_span_id": parent_span,
+                    "tool_name": "Skill",
+                    "skill_name": seed.get("skill_name", ""),
+                    "plugin_name": seed.get("plugin_name", ""),
+                    "status": status,
+                    "turn": turn,
+                    "start_timestamp": start_ms,
+                    "end_timestamp": end_ms,
+                })
+            else:
+                trace_response = tool_response if tool_response else tool_result
+                response_data, was_truncated = trace_writer.truncate_response(trace_response)
+                trace_writer.append_trace(client, session_id, {
+                    "event": "tool_end",
+                    "span_id": tool_use_id or marker_key,
+                    "parent_span_id": parent_span,
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "status": status,
+                    "error_message": error_message or None,
+                    "request_id": request_id or None,
+                    "duration_ms": end_ms - start_ms,
+                    "tool_response": trace_writer.sanitize_trace_value(response_data),
+                    "truncated": was_truncated,
+                    "turn": turn,
+                    "start_timestamp": start_ms,
+                    "end_timestamp": end_ms,
+                    "skill_tag": _path_skill_tag(tool_input),
+                    "cloud_api": _cloud_api_meta(tool_name, tool_input, request_id),
+                })
+                # Codex bash-as-skill: companion skill_invocation event so
+                # the viewer renders the lightning icon alongside the bash
+                # node. The `.skill` suffix keeps span_id distinct.
+                # parent_span_id points at the bash (this_span_id), not the
+                # bash's parent — that nests the skill inside its bash in
+                # the tree, matching the logical "this bash ran the skill"
+                # relationship. The token walker checks both `id` and
+                # `id.skill` so attribution still works for inner bashes
+                # whose parent chain leads up to the outer bash.
+                if seed.get("event_type") == "skill_invocation" and tool_name == "Bash":
+                    trace_writer.append_trace(client, session_id, {
+                        "event": "skill_invocation",
+                        "span_id": this_span_id + ".skill",
+                        "parent_span_id": this_span_id,
+                        "tool_name": "Skill",
+                        "skill_name": seed.get("skill_name", ""),
+                        "plugin_name": seed.get("plugin_name", ""),
+                        "status": status,
+                        "turn": turn,
+                        "start_timestamp": start_ms,
+                        "end_timestamp": end_ms,
+                    })
         except Exception:
             pass
 

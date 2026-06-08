@@ -80,7 +80,17 @@ brew install aliyun-cli
 
 ## Install Plugins
 
-### Codex
+### One-command install (recommended)
+
+```bash
+npx openplugin acloudlabs-unofficial/alibabacloud-agent-toolkit
+```
+
+Automatically detects installed clients (Claude Code, Codex, QoderWork), lets you pick which plugins to install, and configures everything.
+
+### Manual install
+
+#### Codex
 
 ```text
 codex plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
@@ -88,7 +98,7 @@ codex plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
 
 Then open Codex `/plugins` and install `alibabacloud-core` and/or `alibabacloud-spec-ops`.
 
-### Claude Code
+#### Claude Code
 
 ```text
 /plugin marketplace add acloudlabs-unofficial/alibabacloud-agent-toolkit
@@ -96,6 +106,20 @@ Then open Codex `/plugins` and install `alibabacloud-core` and/or `alibabacloud-
 /plugin install alibabacloud-spec-ops@alibabacloud-agent-toolkit
 /reload-plugins
 ```
+
+#### QoderWork
+
+Install the plugin via QoderWork's expert-kit installer (the existing
+`.claude-plugin/plugin.json` manifest is accepted), then register the
+telemetry hooks once per machine:
+
+```bash
+bash plugins/alibabacloud-core/tools/qoderwork/enable-qoderwork-hooks.sh
+```
+
+The installer patches `~/.qoderwork/settings.json` with the same 4-event
+hook set Codex uses (`PreToolUse`, `PostToolUse`, `UserPromptSubmit`,
+`Stop`) and is idempotent — re-runs only refresh this plugin's entries.
 
 ## Use Spec-Ops: Spec-Driven Workflow
 

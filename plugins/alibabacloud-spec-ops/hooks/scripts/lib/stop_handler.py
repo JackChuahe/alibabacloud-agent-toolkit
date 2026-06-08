@@ -20,6 +20,22 @@ import uuid as _uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from state import SessionState, cleanup_stale_sessions  # noqa: E402
 import trace_writer  # noqa: E402
+import token_recorder  # noqa: E402
+
+EMPTY_TOKENS = {
+    "input_uncached": 0, "input_cached": 0, "input_creation": 0,
+    "output": 0, "reasoning": 0,
+}
+
+
+def _add_tokens(a: dict, b: dict) -> dict:
+    out = dict(a)
+    for k in EMPTY_TOKENS:
+        av = out.get(k) or 0
+        bv = b.get(k) or 0
+        out[k] = av + bv
+    return out
+
 
 DEBUG = os.environ.get("ALIBABACLOUD_TELEMETRY_DEBUG") == "1"
 
@@ -29,6 +45,9 @@ _EMIT_ORDER = [
     "mcp-tool", "skill-name", "plugin-name", "tool-request-id",
     "cli-command", "query-summary", "error-message",
     "span-id", "parent-span-id",
+    "skill-tag",
+    "input-uncached-tokens", "input-cached-tokens", "input-creation-tokens",
+    "output-tokens", "reasoning-tokens",
 ]
 
 
@@ -41,11 +60,56 @@ def _detect_client(payload_str: str) -> str:
         return "qoderwork"
     if "__vscode" in payload_str:
         return "vscode"
+    if '"turn_id":' in payload_str:
+        return "codex"
     return "claude-code"
 
 
 def _iso_from_ms(ms: int) -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(ms / 1000.0))
+    t = time.gmtime(ms / 1000.0)
+    millis = int(ms % 1000)
+    return time.strftime("%Y-%m-%dT%H:%M:%S", t) + f".{millis:03d}Z"
+
+
+def _uploader_cmd() -> list:
+    """Resolve mcp-proxy invocation. Env var lets .sh override for dev."""
+    override = os.environ.get("ALIBABACLOUD_TELEMETRY_UPLOADER")
+    if override:
+        return override.split()
+    return ["uvx", "alibabacloud.mcp-proxy@latest", "plugin-telemetry"]
+
+
+def _spawn_upload(args: dict) -> None:
+    """Fire-and-forget mcp-proxy upload for per-call events. The primary
+    user_prompt_turn_start event still flows via stdout to the .sh wrapper —
+    this is only for the N extra llm_call events that don't fit the
+    single-event stdout protocol."""
+    import subprocess
+    argv = list(_uploader_cmd())
+    for key in _EMIT_ORDER:
+        v = args.get(key)
+        if v is None or v == "":
+            continue
+        argv.append(f"--{key}")
+        argv.append(str(v))
+    log_path = os.environ.get("ALIBABACLOUD_TELEMETRY_UPLOAD_LOG")
+    if log_path:
+        try:
+            out_fd = open(log_path, "ab")
+        except Exception:
+            out_fd = subprocess.DEVNULL
+    else:
+        out_fd = subprocess.DEVNULL
+    try:
+        subprocess.Popen(
+            argv,
+            stdin=subprocess.DEVNULL,
+            stdout=out_fd,
+            stderr=out_fd,
+            start_new_session=True,
+        )
+    except Exception:
+        pass
 
 
 def _emit(args: dict) -> None:
@@ -97,7 +161,71 @@ def main() -> int:
             current_turn = int(st.data.get("turn", 0))
             stop_ts = int(time.time() * 1000)
 
-            # --- Local trace: backfill prompt and write turn_end ---
+            # --- Token recorder: read transcript slice (always advance offset) ---
+            transcript_path = data.get("transcript_path") or ""
+            tokens_offset = int(st.data.get("tokens_offset", 0))
+            tokens_call_index = int(st.data.get("tokens_call_index", 0))
+            tokens_parser_state = st.data.get("tokens_parser_state") or {}
+            fallback_turn_id = f"stop-{current_turn}"
+            token_rows: list[dict] = []
+            new_offset = tokens_offset
+            new_call_index = tokens_call_index
+            new_parser_state = tokens_parser_state
+            try:
+                token_rows, new_offset, new_call_index, new_parser_state = (
+                    token_recorder.process_stop(
+                        client, transcript_path, tokens_offset,
+                        tokens_call_index, tokens_parser_state,
+                        fallback_turn_id,
+                    )
+                )
+            except Exception:
+                token_rows = []
+
+            # Always advance offsets, even when this turn is not traced —
+            # otherwise the next traced turn would re-attribute these tokens.
+            st.data["tokens_offset"] = new_offset
+            st.data["tokens_call_index"] = new_call_index
+            if isinstance(new_parser_state, dict):
+                st.data["tokens_parser_state"] = new_parser_state
+
+            # --- Token aggregation: always compute (consumed by both
+            # local trace below and the remote user_prompt_turn_start emit) ---
+            # Map tool_use_id → span_id for tool token attribution. The
+            # viewer reconstructs the parent chain itself, so no parent_map
+            # or skill_set is needed here.
+            turn_spans = st.data.get("turn_spans") or []
+            tool_use_to_span = {
+                s["tool_use_id"]: s["span_id"]
+                for s in turn_spans
+                if s.get("tool_use_id")
+            }
+            # Layer 1 (strict): turn totals + per-call list. The viewer
+            # reconstructs Layer 2 (skill-attributed estimates) by walking
+            # each call's tool spans — see
+            # telemetry_view/data.py::compute_token_layers.
+            turn_tokens = dict(EMPTY_TOKENS)
+            llm_calls: list = []
+            for row in token_rows:
+                n = row.get("normalized") or {}
+                turn_tokens = _add_tokens(turn_tokens, n)
+                tool_use_ids = list(row.get("tool_use_ids") or [])
+                tool_span_ids = [
+                    tool_use_to_span.get(tu_id) or tu_id
+                    for tu_id in tool_use_ids
+                ]
+                call_ts = row.get("ts") or _iso_from_ms(stop_ts)
+                llm_calls.append({
+                    "span_id": _uuid.uuid4().hex[:16],
+                    "call_index": row.get("call_index"),
+                    "model": row.get("model"),
+                    "ts": call_ts,
+                    "tool_use_ids": tool_use_ids,
+                    "tool_span_ids": tool_span_ids,
+                    "llm_tokens": dict(n),
+                })
+
+            # --- Local trace: backfill prompt, write llm_call + turn_end ---
             if trace_writer.trace_enabled() and turn_has_trace:
                 pending = st.data.get("pending_prompt")
                 if pending:
@@ -110,6 +238,35 @@ def main() -> int:
                         "start_timestamp": pending_prompt_ts,
                         "end_timestamp": stop_ts,
                     })
+
+                # First-class llm_call events in the timeline. Sit at turn
+                # level (parent = prompt_span), siblings with tool_call
+                # events, ordered by start_timestamp. The turn_end.llm_calls
+                # side-table below is preserved for backward-compat with
+                # viewers that read it directly.
+                for call in llm_calls:
+                    trace_writer.append_trace(client, session_id, {
+                        "event": "llm_call",
+                        "span_id": call["span_id"],
+                        "parent_span_id": prompt_span,
+                        "turn": current_turn,
+                        "start_timestamp": call["ts"],
+                        "end_timestamp": call["ts"],
+                        "call_index": call["call_index"],
+                        "model": call["model"],
+                        "tool_use_ids": call["tool_use_ids"],
+                        "tool_span_ids": call["tool_span_ids"],
+                        "llm_tokens": call["llm_tokens"],
+                    })
+
+                # Update cumulative session total (only counts traced turns)
+                session_total = st.data.get("aliyun_session_tokens") or dict(EMPTY_TOKENS)
+                session_total = _add_tokens(session_total, turn_tokens)
+                st.data["aliyun_session_tokens"] = session_total
+
+                # tool_tokens kept as empty dict for backward compatibility:
+                # old viewers fall through their legacy path and render no
+                # chips rather than crashing or showing duplicated numbers.
                 trace_writer.append_trace(client, session_id, {
                     "event": "turn_end",
                     "span_id": _uuid.uuid4().hex[:16],
@@ -118,7 +275,36 @@ def main() -> int:
                     "turn": current_turn,
                     "start_timestamp": stop_ts,
                     "end_timestamp": stop_ts,
+                    "turn_tokens": turn_tokens,
+                    "aliyun_session_tokens": session_total,
+                    "llm_calls": llm_calls,
+                    "tool_tokens": {},
                 })
+
+            # --- Remote telemetry: per-LLM-call uploads (fire-and-forget) ---
+            # These bypass the single-event stdout protocol because the .sh
+            # wrapper only fires one mcp-proxy invocation per hook trigger.
+            # Each call gets its own background uvx process; ordering in SLS
+            # is by start_timestamp (no callIndex needed, no model uploaded).
+            if turn_has_trace and prompt_span and llm_calls:
+                for call in llm_calls:
+                    _spawn_upload({
+                        "client-name": client,
+                        "event-type": "llm_call",
+                        "start-timestamp": call["ts"],
+                        "end-timestamp": call["ts"],
+                        "tool-name": "llm_call",
+                        "session-id": session_id,
+                        "status": "success",
+                        "turn": str(current_turn),
+                        "span-id": call["span_id"],
+                        "parent-span-id": prompt_span,
+                        "input-uncached-tokens": str(call["llm_tokens"].get("input_uncached") or 0),
+                        "input-cached-tokens":   str(call["llm_tokens"].get("input_cached")   or 0),
+                        "input-creation-tokens": str(call["llm_tokens"].get("input_creation") or 0),
+                        "output-tokens":         str(call["llm_tokens"].get("output")         or 0),
+                        "reasoning-tokens":      str(call["llm_tokens"].get("reasoning")      or 0),
+                    })
 
             # --- Remote telemetry: emit user_prompt_turn_start ---
             if turn_has_trace and prompt_span:
@@ -133,6 +319,11 @@ def main() -> int:
                     "status": "success",
                     "turn": str(current_turn),
                     "span-id": prompt_span,
+                    "input-uncached-tokens": str(turn_tokens.get("input_uncached") or 0),
+                    "input-cached-tokens": str(turn_tokens.get("input_cached") or 0),
+                    "input-creation-tokens": str(turn_tokens.get("input_creation") or 0),
+                    "output-tokens": str(turn_tokens.get("output") or 0),
+                    "reasoning-tokens": str(turn_tokens.get("reasoning") or 0),
                 }
                 should_emit = True
 
@@ -142,6 +333,14 @@ def main() -> int:
                 st.data.pop("pending_prompt", None)
                 st.data.pop("pending_prompt_ts", None)
                 st.data.pop("prompt_span_id", None)
+                st.data["turn_spans"] = []
+                # Clear post-tool-use dedup set — claude double-fires are
+                # always within the same turn, so this keeps memory bounded
+                # without losing any dedup signal.
+                st.data["posted_tool_use_ids"] = []
+                # Same for pre-tool-use dedup set (claude fires PreToolUse
+                # twice per tool_use_id within one turn).
+                st.data["pre_seen_ids"] = []
 
             # Increment turn (existing behavior)
             st.data["turn"] = int(st.data.get("turn", 0)) + 1
