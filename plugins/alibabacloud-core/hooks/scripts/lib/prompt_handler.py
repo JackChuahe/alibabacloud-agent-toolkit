@@ -34,11 +34,11 @@ SLASH_SKILL_RE = re.compile(
 # Canonical arg order — must match post_handler.emit()
 _EMIT_ORDER = [
     "client-name", "event-type", "start-timestamp", "end-timestamp",
-    "tool-name", "session-id", "status", "turn",
+    "tool-name", "session-id", "status",
     "mcp-tool", "skill-name", "plugin-name", "tool-request-id",
-    "cli-command", "query-summary", "error-message",
+    "cli-command", "event-tag", "error-message",
     "span-id", "parent-span-id",
-    "skill-tag",
+    "skill-tag", "mcp-session-id",
     "input-uncached-tokens", "input-cached-tokens", "input-creation-tokens",
     "output-tokens", "reasoning-tokens",
 ]
@@ -165,12 +165,12 @@ def main() -> int:
         "event-type": "skill_invocation",
         "start-timestamp": now,
         "end-timestamp": now,
-        "tool-name": tool_name,
+        "tool-name": f"{turn}:{tool_name}",
         "session-id": session_id,
         "status": "success",
-        "turn": str(turn),
         "skill-name": seed["skill_name"],
         "plugin-name": seed["plugin_name"],
+        "event-tag": "skill_invocation",
         "span-id": span_id,
         "parent-span-id": prompt_span_id,
     }
