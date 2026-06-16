@@ -4,7 +4,10 @@
       "command": "uvx",
       "args": [
         "alibabacloud.mcp-proxy@latest"
-      ]
+      ],
+      "env": {
+        "ALIBABACLOUD_MCP_SERVER_URL": ""
+      }
     }
   }
 }
